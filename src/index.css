@@ -55,8 +55,17 @@ button {
 .app {
   max-width: 720px;
   margin: 0 auto;
-  min-height: 100dvh;
+  min-height: 100vh;
   padding-bottom: calc(var(--safe-bottom) + var(--keyboard-inset));
+}
+
+.app-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  padding-bottom: 0;
+  overflow: hidden;
 }
 
 .topbar {
@@ -66,8 +75,9 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   padding: calc(10px + var(--safe-top)) 16px 10px;
-  background: color-mix(in srgb, var(--paper) 88%, white);
+  background: #f7f0e0;
   border-bottom: 1px solid var(--rule);
   backdrop-filter: blur(10px);
 }
@@ -112,6 +122,11 @@ button {
   border: 1px solid var(--rule);
 }
 
+.btn-compact {
+  min-height: 32px;
+  padding: 0 14px;
+}
+
 .btn-warn {
   background: var(--cinnabar);
   color: #f8efe4;
@@ -122,6 +137,11 @@ button {
   min-width: 44px;
   border-radius: 50%;
   border: 1px solid var(--rule);
+}
+
+.icon-danger {
+  color: var(--cinnabar);
+  border-color: rgba(156, 43, 31, 0.28);
 }
 
 .book-card,
@@ -145,24 +165,57 @@ button {
   margin: 0 0 6px;
 }
 
-.toolbar {
+.editor-chrome {
   position: sticky;
   top: calc(52px + var(--safe-top));
   z-index: 7;
+  background: #f7f0e0;
+}
+
+.toolbar {
   display: flex;
-  gap: 4px;
+  flex-wrap: nowrap;
+  gap: 2px;
   overflow-x: auto;
-  padding: 8px 12px;
+  padding: 4px 8px;
   background: #f7f0e0;
   border-bottom: 1px solid var(--rule);
+  -webkit-overflow-scrolling: touch;
 }
 
 .toolbar button {
-  min-width: 44px;
-  padding: 0 10px;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+.format-pop {
+  display: flex;
+  gap: 4px;
+  margin: 6px 8px 8px;
+  padding: 4px;
+  background: #fbf6ea;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(28, 20, 16, 0.16);
+}
+
+.format-pop button {
+  min-height: 40px;
+  padding: 0 12px;
   border-radius: 8px;
   font-size: 14px;
   color: var(--ink-soft);
+}
+
+.format-pop button.is-on {
+  background: var(--ink);
+  color: var(--paper);
 }
 
 .toolbar button.is-on {
@@ -172,11 +225,16 @@ button {
 
 .ProseMirror {
   min-height: 60vh;
-  padding: 24px 20px 80px;
+  padding: 24px 20px 48px;
   font-family: var(--serif);
   font-size: 18px;
-  line-height: 1.85;
+  line-height: 1.5;
   outline: none;
+}
+
+.ProseMirror[contenteditable='true'] {
+  -webkit-user-modify: read-write;
+  word-wrap: break-word;
 }
 
 .ProseMirror h1,
@@ -197,7 +255,37 @@ button {
   max-width: 100%;
   height: auto;
   display: block;
-  margin: 12px 0;
+  margin: 12px auto;
+}
+
+.ProseMirror img.is-picked,
+.ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: 3px;
+}
+
+.image-float {
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: #fbf6ea;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(28, 20, 16, 0.16);
+}
+
+.image-float button {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.image-float button.is-on {
+  background: var(--ink);
+  color: var(--paper);
 }
 
 .ProseMirror p.is-editor-empty:first-child::before {
@@ -246,12 +334,49 @@ button {
   margin: 0 0 8px;
 }
 
+.preview-screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 18px var(--safe-bottom);
+  overflow: hidden;
+}
+
+.preview-nav {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-bottom: 6px;
+}
+
+.preview-title {
+  flex-shrink: 0;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0 0 8px;
+}
+
+.preview-warning {
+  flex-shrink: 0;
+  margin: 0 0 8px;
+}
+
+.preview-frame-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
 .preview-frame {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  min-height: 70vh;
+  height: 100%;
   border: 0;
   background: transparent;
-  font-family: var(--serif);
 }
 
 .banner {
@@ -261,6 +386,11 @@ button {
   color: var(--cinnabar-deep);
   border-radius: 8px;
   font-size: 14px;
+}
+
+.banner-ok {
+  background: #dce8d4;
+  color: #2c4a28;
 }
 
 .empty {
@@ -279,8 +409,138 @@ button {
   background: var(--paper-deep);
 }
 
+.book-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.book-head-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.book-head-cover {
+  width: 108px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cover-lg {
+  width: 108px;
+  height: 144px;
+}
+
+.cover-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.chapter-card {
+  padding: 10px 12px;
+}
+
+.chapter-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.chapter-index {
+  flex-shrink: 0;
+  font-family: var(--serif);
+  font-weight: 600;
+}
+
+.chapter-title-row input,
+.chapter-name-bar input {
+  flex: 1;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: rgba(255, 252, 245, 0.8);
+}
+
+.chapter-title-row input {
+  min-height: 36px;
+}
+
+.chapter-name-bar {
+  position: sticky;
+  top: calc(52px + var(--safe-top));
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #f7f0e0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.chapter-name-bar label {
+  flex-shrink: 0;
+}
+
+.findbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 8px 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  background: #fbf6ea;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(28, 20, 16, 0.16);
+}
+
+.findbar input {
+  min-height: 32px;
+  min-width: 120px;
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.findbar button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 14px;
+  border-radius: 8px;
+}
+
 .chapter-actions {
   display: flex;
-  gap: 4px;
-  margin-top: 8px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.chapter-actions .btn {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.chapter-actions .icon-btn {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  flex: 0 0 auto;
+}
+
+.chapter-card .muted {
+  margin-top: 4px;
 }

@@ -1,4 +1,5 @@
 import type { TiptapDoc, TiptapMark, TiptapNode } from '../types/book'
+import { clampWidth, type ImageAlign } from '../images/layout'
 import { parseHtml } from './xml'
 
 const SKIP = new Set(['script', 'style', 'svg', 'video', 'audio', 'head'])
@@ -57,10 +58,20 @@ function inlineNodes(node: Node, resolveHref: (src: string) => string, marks: Ti
     const src = node.getAttribute('src') ?? ''
     const resolved = resolveHref(src)
     if (!resolved) return []
+    const imageId = node.getAttribute('data-image-id') || node.getAttribute('id') || undefined
+    const width = clampWidth(Number(node.getAttribute('data-width') || '100') || 100)
+    const rawAlign = node.getAttribute('data-align') || 'center'
+    const align: ImageAlign = rawAlign === 'left' || rawAlign === 'right' ? rawAlign : 'center'
     return [
       {
         type: 'image',
-        attrs: { src: resolved, alt: node.getAttribute('alt') ?? '' },
+        attrs: {
+          src: resolved,
+          alt: node.getAttribute('alt') ?? '',
+          ...(imageId ? { imageId } : {}),
+          width,
+          align,
+        },
       },
     ]
   }

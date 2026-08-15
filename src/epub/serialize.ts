@@ -1,6 +1,9 @@
 import type { BookRecord, PackInput, TiptapDoc, TiptapNode } from '../types/book'
+import { imageCss, type ImageAlign } from '../images/layout'
 import { containerXml, zipEpub } from './fixtures'
+import { exportChapterHeading } from './headings'
 import { dirname, joinPath } from './paths'
+import { nestedNavHtml, outlineFromXhtml } from './toc'
 import { escapeXml } from './xml'
 
 function marksToTags(marks: { type: string }[] | undefined): { open: string; close: string } {
@@ -19,54 +22,75 @@ function marksToTags(marks: { type: string }[] | undefined): { open: string; clo
   return { open, close }
 }
 
-function inlineHtml(nodes: TiptapNode[] | undefined): string {
-  if (!nodes?.length) return ''
-  return nodes
-    .map((node) => {
-      if (node.type === 'text') {
-        const tags = marksToTags(node.marks)
-        return `${tags.open}${escapeXml(node.text ?? '')}${tags.close}`
-      }
-      if (node.type === 'hardBreak') return '<br/>'
-      if (node.type === 'image') {
-        const src = escapeXml(String(node.attrs?.src ?? ''))
-        const alt = escapeXml(String(node.attrs?.alt ?? ''))
-        const id = node.attrs?.imageId ? ` id="${escapeXml(String(node.attrs.imageId))}"` : ''
-        return `<img src="${src}" alt="${alt}"${id}/>`
-      }
-      return inlineHtml(node.content)
-    })
-    .join('')
+function imageHtml(node: TiptapNode): string {
+  const src = escapeXml(String(node.attrs?.src ?? ''))
+  const alt = escapeXml(String(node.attrs?.alt ?? ''))
+  const imageId = node.attrs?.imageId ? String(node.attrs.imageId) : ''
+  const width = Number(node.attrs?.width ?? 100) || 100
+  const rawAlign = String(node.attrs?.align ?? 'center')
+  const align: ImageAlign = rawAlign === 'left' || rawAlign === 'right' ? rawAlign : 'center'
+  const idAttr = imageId ? ` id="${escapeXml(imageId)}"` : ''
+  const dataId = imageId ? ` data-image-id="${escapeXml(imageId)}"` : ''
+  return `<img src="${src}" alt="${alt}"${idAttr}${dataId} data-width="${width}" data-align="${align}" style="${imageCss(width, align)}"/>`
 }
 
-function blockHtml(node: TiptapNode): string {
-  if (node.type === 'heading') {
-    const level = Number(node.attrs?.level ?? 1)
-    const tag = `h${Math.min(6, Math.max(1, level))}`
-    return `<${tag}>${inlineHtml(node.content)}</${tag}>`
-  }
-  if (node.type === 'paragraph') {
-    return `<p>${inlineHtml(node.content)}</p>`
-  }
-  if (node.type === 'bulletList') {
-    const items = (node.content ?? [])
-      .map((item) => `<li>${(item.content ?? []).map(blockHtml).join('')}</li>`)
+function createBodyRenderer() {
+  let h2 = 0
+  let h3 = 0
+  const inlineHtml = (nodes: TiptapNode[] | undefined): string => {
+    if (!nodes?.length) return ''
+    return nodes
+      .map((node) => {
+        if (node.type === 'text') {
+          const tags = marksToTags(node.marks)
+          return `${tags.open}${escapeXml(node.text ?? '')}${tags.close}`
+        }
+        if (node.type === 'hardBreak') return '<br/>'
+        if (node.type === 'image') return imageHtml(node)
+        return inlineHtml(node.content)
+      })
       .join('')
-    return `<ul>${items}</ul>`
   }
-  if (node.type === 'orderedList') {
-    const items = (node.content ?? [])
-      .map((item) => `<li>${(item.content ?? []).map(blockHtml).join('')}</li>`)
-      .join('')
-    return `<ol>${items}</ol>`
+  const blockHtml = (node: TiptapNode): string => {
+    if (node.type === 'heading') {
+      const level = Number(node.attrs?.level ?? 1)
+      const tag = `h${Math.min(6, Math.max(1, level))}`
+      let idAttr = ''
+      if (level === 2) {
+        h2 += 1
+        h3 = 0
+        idAttr = ` id="h2-${h2}"`
+      } else if (level === 3) {
+        h3 += 1
+        idAttr = ` id="h2-${Math.max(h2, 1)}-h3-${h3}"`
+      }
+      return `<${tag}${idAttr}>${inlineHtml(node.content)}</${tag}>`
+    }
+    if (node.type === 'paragraph') {
+      return `<p>${inlineHtml(node.content)}</p>`
+    }
+    if (node.type === 'bulletList') {
+      const items = (node.content ?? [])
+        .map((item) => `<li>${(item.content ?? []).map(blockHtml).join('')}</li>`)
+        .join('')
+      return `<ul>${items}</ul>`
+    }
+    if (node.type === 'orderedList') {
+      const items = (node.content ?? [])
+        .map((item) => `<li>${(item.content ?? []).map(blockHtml).join('')}</li>`)
+        .join('')
+      return `<ol>${items}</ol>`
+    }
+    if (node.type === 'image') {
+      return `<p>${imageHtml(node)}</p>`
+    }
+    return (node.content ?? []).map(blockHtml).join('')
   }
-  if (node.type === 'image') {
-    return `<p>${inlineHtml([node])}</p>`
-  }
-  return (node.content ?? []).map(blockHtml).join('')
+  return { blockHtml }
 }
 
 export function docToXhtml(doc: TiptapDoc, title: string, lang = 'zh-CN'): string {
+  const { blockHtml } = createBodyRenderer()
   const body = (doc.content ?? []).map(blockHtml).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${escapeXml(lang)}" lang="${escapeXml(lang)}">
@@ -138,8 +162,18 @@ export async function packEpub(input: PackInput): Promise<Uint8Array> {
       `    <item id="${escapeXml(chapter.id)}" href="${escapeXml(relFrom(opfDir, chapter.href))}" media-type="application/xhtml+xml"/>`,
     )
     spineLines.push(`    <itemref idref="${escapeXml(chapter.id)}"/>`)
+    const tocSource =
+      chapter.state === 'simplified' && simplified
+        ? simplified.xhtml
+        : decodeEntry(files.get(chapter.href))
+    const headings = tocSource ? outlineFromXhtml(tocSource) : []
     navLis.push(
-      `      <li><a href="${escapeXml(relFrom(dirname(navHref), chapter.href))}">${escapeXml(chapter.title)}</a></li>`,
+      nestedNavHtml(
+        relFrom(dirname(navHref), chapter.href),
+        exportChapterHeading(chapter.spineIndex, chapter.title),
+        headings,
+        escapeXml,
+      ),
     )
   }
 
@@ -183,6 +217,12 @@ ${navLis.join('\n')}
     ordered.push({ path, data })
   }
   return zipEpub(ordered)
+}
+
+function decodeEntry(data: Uint8Array | string | undefined): string {
+  if (!data) return ''
+  if (typeof data === 'string') return data
+  return new TextDecoder().decode(data)
 }
 
 function relFrom(fromDir: string, absPath: string): string {

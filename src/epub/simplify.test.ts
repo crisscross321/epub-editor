@@ -53,4 +53,16 @@ describe('simplifyXhtml', () => {
     const json = JSON.stringify(doc)
     expect(json).toContain('resolved:../images/cover.png')
   })
+
+  it('keeps image id, width and alignment from data attributes', () => {
+    const doc = simplifyXhtml(
+      '<p><img src="a.jpg" alt="图" data-image-id="img-a" data-width="40" data-align="left"/></p>',
+      (src) => src,
+    )
+    const image = doc.content?.[0]?.content?.[0]
+    expect(image).toMatchObject({
+      type: 'image',
+      attrs: { src: 'a.jpg', alt: '图', imageId: 'img-a', width: 40, align: 'left' },
+    })
+  })
 })

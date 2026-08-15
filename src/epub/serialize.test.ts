@@ -155,4 +155,71 @@ describe('packEpub', () => {
     expect(nav).toContain('新章')
     expect(nav).not.toContain('第二章')
   })
+
+  it('writes heading ids and nested nav for h2 and h3', async () => {
+    const book: BookRecord = {
+      id: 'toc-1',
+      title: '目录书',
+      author: '我',
+      language: 'zh-CN',
+      updatedAt: new Date().toISOString(),
+      opfHref: 'OEBPS/content.opf',
+      chapters: [
+        {
+          id: 'ch1',
+          href: 'OEBPS/text/ch1.xhtml',
+          title: '开篇',
+          spineIndex: 0,
+          state: 'simplified',
+        },
+      ],
+    }
+    const doc: TiptapDoc = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '节一' }] },
+        { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: '点A' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '正文' }] },
+      ],
+    }
+    const packed = await packEpub({
+      book,
+      entries: new Map(),
+      simplified: new Map([['ch1', { xhtml: docToXhtml(doc, '开篇'), images: [] }]]),
+    })
+    const zip = await JSZip.loadAsync(packed)
+    const xhtml = await zip.file('OEBPS/text/ch1.xhtml')!.async('string')
+    expect(xhtml).toMatch(/<h2 id="h2-1">节一<\/h2>/)
+    expect(xhtml).toMatch(/<h3 id="h2-1-h3-1">点A<\/h3>/)
+    const nav = await zip.file('OEBPS/nav.xhtml')!.async('string')
+    expect(nav).toContain('第 1 章 开篇')
+    expect(nav).toContain('text/ch1.xhtml#h2-1')
+    expect(nav).toContain('text/ch1.xhtml#h2-1-h3-1')
+    expect(nav).toContain('节一')
+    expect(nav).toContain('点A')
+  })
+
+  it('writes image width and alignment as data attributes and inline style', () => {
+    const xhtml = docToXhtml(
+      {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'image',
+                attrs: { src: 'images/a.jpg', alt: '图', imageId: 'img-a', width: 60, align: 'right' },
+              },
+            ],
+          },
+        ],
+      },
+      '图章',
+    )
+    expect(xhtml).toContain('data-width="60"')
+    expect(xhtml).toContain('data-align="right"')
+    expect(xhtml).toContain('width:60%')
+    expect(xhtml).toContain('margin:12px 0 12px auto')
+  })
 })

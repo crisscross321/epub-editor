@@ -4,6 +4,12 @@ import { messageForUnknown } from '../epub/errors'
 import { parseEpub } from '../epub/parse'
 import { dirname, extname, joinPath } from '../epub/paths'
 import { docToXhtml, imageHrefFor, packEpub, rewriteImageSrcs } from '../epub/serialize'
+import {
+  ensureLeadingH1,
+  exportChapterHeading,
+  splitDocByH1,
+  withChapterHeading,
+} from '../epub/headings'
 import { emptyDoc, simplifyXhtml } from '../epub/simplify'
 import { compressImage } from '../images/compress'
 import * as db from '../storage/idb'
@@ -13,7 +19,22 @@ function now(): string {
 }
 
 function newId(): string {
-  return crypto.randomUUID()
+  const cryptoObj = globalThis.crypto
+  if (typeof cryptoObj?.randomUUID === 'function') {
+    return cryptoObj.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  if (typeof cryptoObj?.getRandomValues === 'function') {
+    cryptoObj.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function touch(book: BookRecord): BookRecord {
@@ -52,7 +73,7 @@ export async function createBook(): Promise<BookRecord> {
       {
         id: chapterId,
         href: 'OEBPS/text/ch1.xhtml',
-        title: '第一章',
+        title: '',
         spineIndex: 0,
         state: 'simplified',
       },
@@ -110,23 +131,49 @@ export async function getDoc(bookId: string, chapterId: string): Promise<TiptapD
   return db.getDoc(bookId, chapterId)
 }
 
-export async function saveDoc(bookId: string, chapterId: string, doc: TiptapDoc): Promise<void> {
+export async function saveDoc(
+  bookId: string,
+  chapterId: string,
+  doc: TiptapDoc,
+): Promise<{ book: BookRecord; focusChapterId: string; focusDoc: TiptapDoc }> {
   const book = await getBook(bookId)
-  await db.putDoc(bookId, chapterId, doc)
-  const heading = firstHeadingText(doc)
-  const chapters = book.chapters.map((ch) =>
-    ch.id === chapterId ? { ...ch, title: heading || ch.title } : ch,
-  )
-  await db.putBook(touch({ ...book, chapters }))
-}
+  const chapter = book.chapters.find((ch) => ch.id === chapterId)
+  if (!chapter) throw new Error('找不到这一章')
+  const slices = splitDocByH1(doc, chapter.title)
+  const first = slices[0]!
+  await db.putDoc(bookId, chapterId, first.doc)
 
-function firstHeadingText(doc: TiptapDoc): string {
-  const heading = doc.content?.find((n) => n.type === 'heading')
-  const parts: string[] = []
-  walkNodes({ type: 'doc', content: heading ? [heading] : [] }, (node) => {
-    if (node.type === 'text' && node.text) parts.push(node.text)
-  })
-  return parts.join('').trim()
+  const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+  const afterIndex = sorted.findIndex((ch) => ch.id === chapterId)
+  const created: ChapterIndex[] = []
+  for (let i = 1; i < slices.length; i += 1) {
+    const slice = slices[i]!
+    const id = `ch-${newId().slice(0, 8)}`
+    const next: ChapterIndex = {
+      id,
+      href: `OEBPS/text/${id}.xhtml`,
+      title: slice.title,
+      spineIndex: afterIndex + i,
+      state: 'simplified',
+    }
+    await db.putDoc(bookId, id, slice.doc)
+    created.push(next)
+  }
+
+  const renamed = sorted.map((ch) => (ch.id === chapterId ? { ...ch, title: first.title } : ch))
+  const chapters = created.length
+    ? [...renamed.slice(0, afterIndex + 1), ...created, ...renamed.slice(afterIndex + 1)].map(
+        (ch, spineIndex) => ({ ...ch, spineIndex }),
+      )
+    : renamed
+
+  const nextBook = await saveBook({ ...book, chapters })
+  const jumped = created[0]
+  return {
+    book: nextBook,
+    focusChapterId: jumped?.id ?? chapterId,
+    focusDoc: jumped ? slices[1]!.doc : first.doc,
+  }
 }
 
 export async function openChapterForEdit(bookId: string, chapterId: string): Promise<TiptapDoc> {
@@ -135,7 +182,7 @@ export async function openChapterForEdit(bookId: string, chapterId: string): Pro
   if (!chapter) throw new Error('找不到这一章')
   if (chapter.state === 'simplified') {
     const existing = await db.getDoc(bookId, chapterId)
-    return existing ?? emptyDoc()
+    return ensureLeadingH1(existing ?? emptyDoc(), chapter.title)
   }
   const bytes = await db.getEntry(bookId, chapter.href)
   if (!bytes) throw new Error('找不到这一章的原文')
@@ -143,12 +190,13 @@ export async function openChapterForEdit(bookId: string, chapterId: string): Pro
   const chapterDir = dirname(chapter.href)
   const doc = simplifyXhtml(xhtml, (src) => joinPath(chapterDir, src))
   await materializeImages(bookId, doc)
-  await db.putDoc(bookId, chapterId, doc)
+  const body = ensureLeadingH1(doc, chapter.title)
+  await db.putDoc(bookId, chapterId, body)
   const chapters = book.chapters.map((ch) =>
     ch.id === chapterId ? { ...ch, state: 'simplified' as const } : ch,
   )
   await db.putBook(touch({ ...book, chapters }))
-  return doc
+  return body
 }
 
 async function materializeImages(bookId: string, doc: TiptapDoc): Promise<void> {
@@ -193,7 +241,7 @@ export async function blobUrlFor(bookId: string, imageId: string): Promise<strin
 }
 
 export async function hydrateDocImages(bookId: string, doc: TiptapDoc): Promise<TiptapDoc> {
-  const clone = structuredClone(doc) as TiptapDoc
+  const clone = JSON.parse(JSON.stringify(doc)) as TiptapDoc
   const jobs: Promise<void>[] = []
   walkNodes(clone, (node) => {
     if (node.type !== 'image') return
@@ -209,19 +257,38 @@ export async function hydrateDocImages(bookId: string, doc: TiptapDoc): Promise<
   return clone
 }
 
-export async function addChapter(bookId: string): Promise<BookRecord> {
+export async function insertChapter(bookId: string, afterId: string): Promise<BookRecord> {
   const book = await getBook(bookId)
-  const n = book.chapters.length + 1
+  const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+  const afterIndex = sorted.findIndex((ch) => ch.id === afterId)
+  const insertAt = afterIndex < 0 ? sorted.length : afterIndex + 1
   const id = `ch-${newId().slice(0, 8)}`
   const chapter: ChapterIndex = {
     id,
     href: `OEBPS/text/${id}.xhtml`,
-    title: `第 ${n} 章`,
-    spineIndex: book.chapters.length,
+    title: '',
+    spineIndex: insertAt,
     state: 'simplified',
   }
   await db.putDoc(bookId, id, emptyDoc())
-  return saveBook({ ...book, chapters: [...book.chapters, chapter] })
+  const next = [...sorted.slice(0, insertAt), chapter, ...sorted.slice(insertAt)].map((ch, index) => ({
+    ...ch,
+    spineIndex: index,
+  }))
+  return saveBook({ ...book, chapters: next })
+}
+
+export async function renameChapter(bookId: string, chapterId: string, title: string): Promise<BookRecord> {
+  const book = await getBook(bookId)
+  const chapters = book.chapters.map((ch) => (ch.id === chapterId ? { ...ch, title: title.trim() } : ch))
+  return saveBook({ ...book, chapters })
+}
+
+export async function addChapter(bookId: string): Promise<BookRecord> {
+  const book = await getBook(bookId)
+  const last = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).pop()
+  if (last) return insertChapter(bookId, last.id)
+  return insertChapter(bookId, '')
 }
 
 export async function deleteChapter(bookId: string, chapterId: string): Promise<BookRecord> {
@@ -293,8 +360,9 @@ export async function exportEpub(bookId: string): Promise<Uint8Array> {
       const packed = packedImages.find((img) => img.href.includes(imageId))
       return packed ? relativeSrc(chapter.href, packed.href) : undefined
     })
+    const heading = exportChapterHeading(chapter.spineIndex, chapter.title)
     simplified.set(chapter.id, {
-      xhtml: docToXhtml(mapped, chapter.title, book.language),
+      xhtml: docToXhtml(withChapterHeading(mapped, heading), heading, book.language),
       images: packedImages,
     })
   }
@@ -330,7 +398,8 @@ export async function getChapterPreview(
   if (chapter.state === 'simplified') {
     const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
     const hydrated = await hydrateDocImages(bookId, doc)
-    return { html: docToXhtml(hydrated, chapter.title) }
+    const heading = exportChapterHeading(chapter.spineIndex, chapter.title)
+    return { html: docToXhtml(withChapterHeading(hydrated, heading), heading) }
   }
   const bytes = await db.getEntry(bookId, chapter.href)
   if (!bytes) {

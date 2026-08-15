@@ -1,7 +1,15 @@
+import { Capacitor } from '@capacitor/core'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { TiptapDoc } from '../../types/book'
+import { findInRoot } from '../../editor/find'
 import { editorExtensions } from '../../editor/schema'
+import { replaceAllInDoc } from '../../epub/replace'
+import { clampWidth, type ImageAlign } from '../../images/layout'
+import { EditorToolbar } from '../EditorToolbar'
+import { FindReplaceBar } from '../FindReplaceBar'
+import { ImageFloat, imageFloatStyle } from '../ImageFloat'
+import { SimpleEditor } from './SimpleEditor'
 
 export function EditorScreen(props: {
   docKey: string
@@ -11,7 +19,24 @@ export function EditorScreen(props: {
   onChange: (doc: TiptapDoc) => void
   onInsertImage: () => void
 }) {
+  if (Capacitor.getPlatform() === 'android') {
+    return <SimpleEditor {...props} />
+  }
+  return <TipTapEditor {...props} />
+}
+
+function TipTapEditor(props: {
+  docKey: string
+  doc: TiptapDoc
+  pendingImage: { src: string; imageId: string } | null
+  onImageConsumed: () => void
+  onChange: (doc: TiptapDoc) => void
+  onInsertImage: () => void
+}) {
+  const [showFind, setShowFind] = useState(false)
+  const [imageSel, setImageSel] = useState<{ width: number; align: ImageAlign; rect: DOMRect } | null>(null)
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: editorExtensions(),
     content: props.doc,
     editorProps: {
@@ -33,65 +58,116 @@ export function EditorScreen(props: {
     if (!editor || !props.pendingImage) return
     editor.chain().focus().insertContent({
       type: 'image',
-      attrs: { src: props.pendingImage.src, imageId: props.pendingImage.imageId },
+      attrs: {
+        src: props.pendingImage.src,
+        imageId: props.pendingImage.imageId,
+        width: 100,
+        align: 'center',
+      },
     }).run()
     props.onImageConsumed()
   }, [editor, props.pendingImage, props.onImageConsumed])
 
-  if (!editor) return null
+  useEffect(() => {
+    if (!editor) return
+    const sync = () => {
+      if (!editor.isActive('image')) {
+        setImageSel(null)
+        return
+      }
+      const attrs = editor.getAttributes('image')
+      const raw = String(attrs.align ?? 'center')
+      const align: ImageAlign = raw === 'left' || raw === 'right' ? raw : 'center'
+      const from = editor.state.selection.from
+      const dom = editor.view.nodeDOM(from)
+      const el =
+        dom instanceof HTMLElement
+          ? dom.tagName === 'IMG'
+            ? dom
+            : dom.querySelector('img')
+          : null
+      const rect = el?.getBoundingClientRect()
+      if (!rect) {
+        setImageSel(null)
+        return
+      }
+      setImageSel({
+        width: clampWidth(Number(attrs.width ?? 100) || 100),
+        align,
+        rect,
+      })
+    }
+    editor.on('selectionUpdate', sync)
+    editor.on('transaction', sync)
+    window.addEventListener('scroll', sync, true)
+    window.addEventListener('resize', sync)
+    return () => {
+      editor.off('selectionUpdate', sync)
+      editor.off('transaction', sync)
+      window.removeEventListener('scroll', sync, true)
+      window.removeEventListener('resize', sync)
+    }
+  }, [editor])
 
-  const setBlock = (level: 0 | 1 | 2 | 3 | 4 | 5 | 6) => {
+  if (!editor) {
+    return <div className="muted" style={{ padding: 20 }}>正在打开编辑器…</div>
+  }
+
+  const setBlock = (level: 0 | 1 | 2 | 3) => {
     if (level === 0) editor.chain().focus().setParagraph().run()
     else editor.chain().focus().toggleHeading({ level }).run()
   }
 
   return (
     <>
-      <div className="toolbar">
-        <button type="button" className={editor.isActive('heading', { level: 1 }) ? 'is-on' : ''} onClick={() => setBlock(1)}>
-          H1
-        </button>
-        <button type="button" className={editor.isActive('heading', { level: 2 }) ? 'is-on' : ''} onClick={() => setBlock(2)}>
-          H2
-        </button>
-        <button type="button" className={editor.isActive('heading', { level: 3 }) ? 'is-on' : ''} onClick={() => setBlock(3)}>
-          H3
-        </button>
-        <button type="button" className={editor.isActive('heading', { level: 4 }) ? 'is-on' : ''} onClick={() => setBlock(4)}>
-          H4
-        </button>
-        <button type="button" className={editor.isActive('heading', { level: 5 }) ? 'is-on' : ''} onClick={() => setBlock(5)}>
-          H5
-        </button>
-        <button type="button" className={editor.isActive('heading', { level: 6 }) ? 'is-on' : ''} onClick={() => setBlock(6)}>
-          H6
-        </button>
-        <button type="button" className={editor.isActive('paragraph') ? 'is-on' : ''} onClick={() => setBlock(0)}>
-          正文
-        </button>
-        <button type="button" className={editor.isActive('bold') ? 'is-on' : ''} onClick={() => editor.chain().focus().toggleBold().run()}>
-          粗
-        </button>
-        <button type="button" className={editor.isActive('italic') ? 'is-on' : ''} onClick={() => editor.chain().focus().toggleItalic().run()}>
-          斜
-        </button>
-        <button type="button" className={editor.isActive('bulletList') ? 'is-on' : ''} onClick={() => editor.chain().focus().toggleBulletList().run()}>
-          列表
-        </button>
-        <button type="button" className={editor.isActive('orderedList') ? 'is-on' : ''} onClick={() => editor.chain().focus().toggleOrderedList().run()}>
-          编号
-        </button>
-        <button type="button" onClick={props.onInsertImage}>
-          插图
-        </button>
-        <button type="button" onClick={() => editor.chain().focus().undo().run()}>
-          撤销
-        </button>
-        <button type="button" onClick={() => editor.chain().focus().redo().run()}>
-          重做
-        </button>
-      </div>
+      <EditorToolbar
+        headingOn={(level) => (level === 0 ? editor.isActive('paragraph') : editor.isActive('heading', { level }))}
+        formatOn={(kind) => editor.isActive(kind)}
+        onHeading={setBlock}
+        onFormat={(kind) => {
+          if (kind === 'bold') editor.chain().focus().toggleBold().run()
+          if (kind === 'italic') editor.chain().focus().toggleItalic().run()
+          if (kind === 'bulletList') editor.chain().focus().toggleBulletList().run()
+          if (kind === 'orderedList') editor.chain().focus().toggleOrderedList().run()
+        }}
+        onInsertImage={props.onInsertImage}
+        onUndo={() => editor.chain().focus().undo().run()}
+        onRedo={() => editor.chain().focus().redo().run()}
+        showFind={showFind}
+        onToggleFind={() => setShowFind((v) => !v)}
+      >
+        {showFind ? (
+          <FindReplaceBar
+            onFind={(search) => findInRoot(editor.view.dom, search, true)}
+            onFindNext={(search) => findInRoot(editor.view.dom, search, false)}
+            onReplace={(search, replacement) => {
+              if (window.getSelection()?.toString() === search) {
+                editor.commands.insertContent(replacement)
+                return
+              }
+              if (findInRoot(editor.view.dom, search, false) && window.getSelection()?.toString() === search) {
+                editor.commands.insertContent(replacement)
+              }
+            }}
+            onReplaceAll={(search, replacement) => {
+              const { doc, count } = replaceAllInDoc(editor.getJSON() as TiptapDoc, search, replacement)
+              editor.commands.setContent(doc)
+              props.onChange(doc)
+              return count
+            }}
+          />
+        ) : null}
+      </EditorToolbar>
       <EditorContent editor={editor} />
+      {imageSel ? (
+        <ImageFloat
+          width={imageSel.width}
+          align={imageSel.align}
+          onWidth={(width) => editor.chain().updateAttributes('image', { width }).run()}
+          onAlign={(align) => editor.chain().updateAttributes('image', { align }).run()}
+          style={imageFloatStyle(imageSel.rect)}
+        />
+      ) : null}
     </>
   )
 }

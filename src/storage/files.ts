@@ -31,26 +31,54 @@ export function pickImageFile(): Promise<File | null> {
   return pickFile('image/*')
 }
 
-export async function saveEpubToUser(filename: string, bytes: Uint8Array): Promise<void> {
-  const { Capacitor } = await import('@capacitor/core')
-  if (Capacitor.getPlatform() !== 'web') {
-    const { Directory, Filesystem } = await import('@capacitor/filesystem')
-    let binary = ''
-    bytes.forEach((b) => {
-      binary += String.fromCharCode(b)
-    })
-    await Filesystem.writeFile({
-      path: filename,
-      data: btoa(binary),
-      directory: Directory.Documents,
-    })
-    return
+function safeFilename(name: string): string {
+  const trimmed = name.replace(/[\\/:*?"<>|]+/g, '_').trim() || '未命名'
+  return trimmed.toLowerCase().endsWith('.epub') ? trimmed : `${trimmed}.epub`
+}
+
+function toBase64(bytes: Uint8Array): string {
+  const chunk = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += chunk) {
+    const slice = bytes.subarray(i, i + chunk)
+    binary += String.fromCharCode.apply(null, Array.from(slice) as unknown as number[])
   }
+  return btoa(binary)
+}
+
+export async function saveEpubToUser(filename: string, bytes: Uint8Array): Promise<string> {
+  const name = safeFilename(filename)
+  const { Capacitor } = await import('@capacitor/core')
+  if (Capacitor.getPlatform() === 'android') {
+    const { Directory, Filesystem } = await import('@capacitor/filesystem')
+    const { Share } = await import('@capacitor/share')
+    const path = `exports/${name}`
+    await Filesystem.writeFile({
+      path,
+      data: toBase64(bytes),
+      directory: Directory.Cache,
+      recursive: true,
+    })
+    const uri = await Filesystem.getUri({ path, directory: Directory.Cache })
+    try {
+      await Share.share({
+        title: name,
+        text: name,
+        url: uri.uri,
+        dialogTitle: '保存或分享 EPUB',
+      })
+      return `导出成功。请在弹出的菜单里选「文件」「下载」或微信等，把《${name}》存到你找得到的位置。`
+    } catch {
+      return `文件已生成，但分享菜单被取消或无法打开。请再点一次「导出 EPUB」。`
+    }
+  }
+
   const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/epub+zip' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename
+  a.download = name
   a.click()
   URL.revokeObjectURL(url)
+  return `已开始下载《${name}》，请到浏览器的下载列表里查看。`
 }

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BookRecord, TiptapDoc } from './types/book'
 import * as books from './app/bookService'
+import { exportChapterHeading, splitDocByH1 } from './epub/headings'
 import { pickEpubFile, pickImageFile, saveEpubToUser } from './storage/files'
+import { ErrorBoundary } from './ui/ErrorBoundary'
 import { Dialog, TopBar } from './ui/chrome'
-import { BookInfoScreen } from './ui/screens/BookInfoScreen'
 import { BookshelfScreen } from './ui/screens/BookshelfScreen'
 import { ChapterListScreen } from './ui/screens/ChapterListScreen'
 import { EditorScreen } from './ui/screens/EditorScreen'
@@ -13,7 +14,6 @@ type Route =
   | { name: 'shelf' }
   | { name: 'chapters'; bookId: string }
   | { name: 'editor'; bookId: string; chapterId: string }
-  | { name: 'info'; bookId: string }
   | { name: 'preview'; bookId: string }
 
 export default function App() {
@@ -22,7 +22,7 @@ export default function App() {
   const [book, setBook] = useState<BookRecord | null>(null)
   const [doc, setDoc] = useState<TiptapDoc | null>(null)
   const [cover, setCover] = useState<string | null>(null)
-  const [error, setError] = useState('')
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<null | {
     title: string
@@ -33,6 +33,7 @@ export default function App() {
   }>(null)
   const [pendingImage, setPendingImage] = useState<{ src: string; imageId: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const splitting = useRef(false)
 
   const refreshShelf = useCallback(async () => {
     setList(await books.listBooks())
@@ -63,7 +64,7 @@ export default function App() {
     }
   }, [])
 
-  const fail = (err: unknown) => setError(books.messageForUnknown(err))
+  const fail = (err: unknown) => setNotice({ kind: 'err', text: books.messageForUnknown(err) })
 
   const goShelf = async () => {
     setRoute({ name: 'shelf' })
@@ -76,6 +77,7 @@ export default function App() {
     try {
       const created = await books.createBook()
       setBook(created)
+      setCover(null)
       setRoute({ name: 'chapters', bookId: created.id })
       await refreshShelf()
     } catch (err) {
@@ -90,6 +92,7 @@ export default function App() {
       setBusy(true)
       const imported = await books.importEpub(await file.arrayBuffer(), file.name)
       setBook(imported)
+      setCover(await books.coverUrl(imported.id))
       setRoute({ name: 'chapters', bookId: imported.id })
       await refreshShelf()
     } catch (err) {
@@ -133,12 +136,29 @@ export default function App() {
   }
 
   const onDocChange = (next: TiptapDoc) => {
-    if (route.name !== 'editor' || !book) return
+    if (route.name !== 'editor' || !book || splitting.current) return
+    const chapterId = route.chapterId
+    const bookId = book.id
+    const currentTitle = book.chapters.find((ch) => ch.id === chapterId)?.title || ''
     setDoc(next)
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    const willSplit = splitDocByH1(next, currentTitle).length > 1
+    if (willSplit) splitting.current = true
     saveTimer.current = window.setTimeout(() => {
-      void books.saveDoc(book.id, route.chapterId, next)
-    }, 800)
+      void books
+        .saveDoc(bookId, chapterId, next)
+        .then((result) => {
+          setBook(result.book)
+          if (result.focusChapterId !== chapterId) {
+            setDoc(result.focusDoc)
+            setRoute({ name: 'editor', bookId, chapterId: result.focusChapterId })
+          }
+        })
+        .catch(fail)
+        .finally(() => {
+          splitting.current = false
+        })
+    }, willSplit ? 0 : 800)
   }
 
   const onInsertImage = async () => {
@@ -157,9 +177,11 @@ export default function App() {
     if (!book) return
     try {
       setBusy(true)
+      setNotice(null)
       const bytes = await books.exportEpub(book.id)
       const name = `${book.title || '未命名'}.epub`
-      await saveEpubToUser(name, bytes)
+      const message = await saveEpubToUser(name, bytes)
+      setNotice({ kind: 'ok', text: message })
     } catch (err) {
       fail(err)
     } finally {
@@ -167,22 +189,28 @@ export default function App() {
     }
   }
 
+  const editorChapter =
+    route.name === 'editor' && book
+      ? [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).find((c) => c.id === route.chapterId)
+      : undefined
+  const editorIndex =
+    route.name === 'editor' && book
+      ? [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).findIndex((c) => c.id === route.chapterId)
+      : -1
   const title =
     route.name === 'chapters'
       ? book?.title || '未命名'
-      : route.name === 'editor'
-        ? book?.chapters.find((c) => route.name === 'editor' && c.id === route.chapterId)?.title || '编辑'
-        : route.name === 'info'
-          ? '书籍信息'
-          : route.name === 'preview'
-            ? '阅读预览'
-            : undefined
+      : route.name === 'editor' && editorChapter && editorIndex >= 0
+        ? exportChapterHeading(editorIndex, editorChapter.title)
+        : route.name === 'preview'
+          ? '阅读预览'
+          : undefined
 
   return (
-    <div className="app">
+      <div className={route.name === 'preview' ? 'app app-preview' : 'app'}>
       <TopBar
         onBack={route.name === 'shelf' ? undefined : () => {
-          if (route.name === 'editor' || route.name === 'info' || route.name === 'preview') {
+          if (route.name === 'editor' || route.name === 'preview') {
             setRoute({ name: 'chapters', bookId: route.bookId })
             if (book) void loadBook(book.id)
             return
@@ -191,10 +219,10 @@ export default function App() {
         }}
         title={title}
       />
-      {error ? (
-        <div className="banner" role="alert">
-          {error}
-          <button type="button" onClick={() => setError('')}>
+      {notice ? (
+        <div className={notice.kind === 'ok' ? 'banner banner-ok' : 'banner'} role="status">
+          {notice.text}
+          <button type="button" onClick={() => setNotice(null)}>
             关闭
           </button>
         </div>
@@ -206,6 +234,7 @@ export default function App() {
           books={list}
           onOpen={async (id) => {
             await loadBook(id)
+            setCover(await books.coverUrl(id))
             setRoute({ name: 'chapters', bookId: id })
           }}
           onCreate={() => void onCreate()}
@@ -228,8 +257,18 @@ export default function App() {
       {route.name === 'chapters' && book ? (
         <ChapterListScreen
           book={book}
+          coverUrl={cover}
+          onMeta={(patch) => void books.saveBook({ ...book, ...patch }).then(setBook).catch(fail)}
+          onCover={async () => {
+            const file = await pickImageFile()
+            if (!file) return
+            const next = await books.saveCover(book.id, file)
+            setBook(next)
+            setCover(await books.coverUrl(next.id))
+          }}
           onOpenChapter={(id) => void openChapter(id)}
-          onAdd={() => void books.addChapter(book.id).then(setBook).catch(fail)}
+          onRenameChapter={(id, title) => void books.renameChapter(book.id, id, title).then(setBook).catch(fail)}
+          onInsert={(id) => void books.insertChapter(book.id, id).then(setBook).catch(fail)}
           onDelete={(id) =>
             setConfirm({
               title: '删除这一章？',
@@ -243,39 +282,22 @@ export default function App() {
             })
           }
           onMove={(id, dir) => void books.moveChapter(book.id, id, dir).then(setBook).catch(fail)}
-          onInfo={async () => {
-            setCover(await books.coverUrl(book.id))
-            setRoute({ name: 'info', bookId: book.id })
-          }}
           onPreview={() => setRoute({ name: 'preview', bookId: book.id })}
           onExport={() => void onExport()}
         />
       ) : null}
 
       {route.name === 'editor' && doc ? (
-        <EditorScreen
-          docKey={`${route.bookId}:${route.chapterId}`}
-          doc={doc}
-          pendingImage={pendingImage}
-          onImageConsumed={() => setPendingImage(null)}
-          onChange={onDocChange}
-          onInsertImage={() => void onInsertImage()}
-        />
-      ) : null}
-
-      {route.name === 'info' && book ? (
-        <BookInfoScreen
-          book={book}
-          coverUrl={cover}
-          onChange={(patch) => void books.saveBook({ ...book, ...patch }).then(setBook).catch(fail)}
-          onCover={async () => {
-            const file = await pickImageFile()
-            if (!file) return
-            const next = await books.saveCover(book.id, file)
-            setBook(next)
-            setCover(await books.coverUrl(next.id))
-          }}
-        />
+        <ErrorBoundary>
+          <EditorScreen
+            docKey={`${route.bookId}:${route.chapterId}`}
+            doc={doc}
+            pendingImage={pendingImage}
+            onImageConsumed={() => setPendingImage(null)}
+            onChange={onDocChange}
+            onInsertImage={() => void onInsertImage()}
+          />
+        </ErrorBoundary>
       ) : null}
 
       {route.name === 'preview' && book ? <PreviewScreen book={book} /> : null}
