@@ -9,6 +9,7 @@ import { BookshelfScreen } from './ui/screens/BookshelfScreen'
 import { ChapterListScreen } from './ui/screens/ChapterListScreen'
 import { EditorScreen } from './ui/screens/EditorScreen'
 import { PreviewScreen } from './ui/screens/PreviewScreen'
+import { bindKeyboardReveal } from './ui/keepFocusVisible'
 
 type Route =
   | { name: 'shelf' }
@@ -49,22 +50,19 @@ export default function App() {
     void refreshShelf()
   }, [refreshShelf])
 
-  useEffect(() => {
-    const vv = window.visualViewport
-    if (!vv) return
-    const sync = () => {
-      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
-      document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`)
-    }
-    vv.addEventListener('resize', sync)
-    vv.addEventListener('scroll', sync)
-    return () => {
-      vv.removeEventListener('resize', sync)
-      vv.removeEventListener('scroll', sync)
-    }
-  }, [])
+  useEffect(() => bindKeyboardReveal(), [])
 
   const fail = (err: unknown) => setNotice({ kind: 'err', text: books.messageForUnknown(err) })
+
+  const routeRef = useRef(route)
+  const bookRef = useRef(book)
+  const docRef = useRef(doc)
+  const confirmRef = useRef(confirm)
+  const goBackRef = useRef<() => void>(() => {})
+  routeRef.current = route
+  bookRef.current = book
+  docRef.current = doc
+  confirmRef.current = confirm
 
   const goShelf = async () => {
     setRoute({ name: 'shelf' })
@@ -72,6 +70,84 @@ export default function App() {
     setDoc(null)
     await refreshShelf()
   }
+
+  const leaveEditor = () => {
+    const current = routeRef.current
+    if (current.name !== 'editor') return
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    const bookId = current.bookId
+    const chapterId = current.chapterId
+    const currentDoc = docRef.current
+    setDoc(null)
+    setRoute({ name: 'chapters', bookId })
+    if (currentDoc) {
+      void books
+        .saveDoc(bookId, chapterId, currentDoc)
+        .then((result) => setBook(result.book))
+        .catch(fail)
+      return
+    }
+    void loadBook(bookId)
+  }
+
+  const goBack = () => {
+    if (confirmRef.current) {
+      setConfirm(null)
+      return
+    }
+    const current = routeRef.current
+    if (current.name === 'editor') {
+      setConfirm({
+        title: '离开编辑？',
+        body: '确定返回章节列表？修改会自动保存。',
+        confirm: '离开',
+        action: () => {
+          setConfirm(null)
+          leaveEditor()
+        },
+      })
+      return
+    }
+    if (current.name === 'preview') {
+      setRoute({ name: 'chapters', bookId: current.bookId })
+      if (bookRef.current) void loadBook(bookRef.current.id)
+      return
+    }
+    if (current.name === 'chapters') {
+      void goShelf()
+      return
+    }
+    void import('@capacitor/app')
+      .then(({ App }) => App.exitApp())
+      .catch(() => undefined)
+  }
+  goBackRef.current = goBack
+
+  useEffect(() => {
+    let cancelled = false
+    let handle: { remove: () => Promise<void> } | undefined
+    void import('@capacitor/app')
+      .then(({ App }) => {
+        if (cancelled) return undefined
+        return App.addListener('backButton', () => goBackRef.current())
+      })
+      .then((next) => {
+        if (!next) return
+        if (cancelled) {
+          void next.remove()
+          return
+        }
+        handle = next
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      void handle?.remove()
+    }
+  }, [])
 
   const onCreate = async () => {
     try {
@@ -209,14 +285,7 @@ export default function App() {
   return (
       <div className={route.name === 'preview' ? 'app app-preview' : 'app'}>
       <TopBar
-        onBack={route.name === 'shelf' ? undefined : () => {
-          if (route.name === 'editor' || route.name === 'preview') {
-            setRoute({ name: 'chapters', bookId: route.bookId })
-            if (book) void loadBook(book.id)
-            return
-          }
-          void goShelf()
-        }}
+        onBack={route.name === 'shelf' ? undefined : goBack}
         title={title}
       />
       {notice ? (

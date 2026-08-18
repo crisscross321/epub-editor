@@ -1,5 +1,5 @@
 import type { BookRecord, ChapterIndex, TiptapDoc, TiptapNode } from '../types/book'
-import { toArrayBuffer } from '../epub/bytes'
+import { toArrayBuffer, bytesToDataUrl } from '../epub/bytes'
 import { messageForUnknown } from '../epub/errors'
 import { parseEpub } from '../epub/parse'
 import { dirname, extname, joinPath } from '../epub/paths'
@@ -11,6 +11,7 @@ import {
   withChapterHeading,
 } from '../epub/headings'
 import { emptyDoc, simplifyXhtml } from '../epub/simplify'
+import { inlineRelativeImages } from '../epub/previewImages'
 import { compressImage } from '../images/compress'
 import * as db from '../storage/idb'
 
@@ -240,7 +241,17 @@ export async function blobUrlFor(bookId: string, imageId: string): Promise<strin
   return URL.createObjectURL(new Blob([toArrayBuffer(blob.data)], { type: blob.mime }))
 }
 
-export async function hydrateDocImages(bookId: string, doc: TiptapDoc): Promise<TiptapDoc> {
+export async function dataUrlFor(bookId: string, imageId: string): Promise<string | null> {
+  const blob = await db.getBlob(bookId, imageId)
+  if (!blob) return null
+  return bytesToDataUrl(blob.data, blob.mime)
+}
+
+export async function hydrateDocImages(
+  bookId: string,
+  doc: TiptapDoc,
+  kind: 'blob' | 'data' = 'blob',
+): Promise<TiptapDoc> {
   const clone = JSON.parse(JSON.stringify(doc)) as TiptapDoc
   const jobs: Promise<void>[] = []
   walkNodes(clone, (node) => {
@@ -248,7 +259,7 @@ export async function hydrateDocImages(bookId: string, doc: TiptapDoc): Promise<
     const imageId = String(node.attrs?.imageId ?? '')
     if (!imageId) return
     jobs.push(
-      blobUrlFor(bookId, imageId).then((url) => {
+      (kind === 'data' ? dataUrlFor(bookId, imageId) : blobUrlFor(bookId, imageId)).then((url) => {
         if (url) node.attrs = { ...node.attrs, src: url }
       }),
     )
@@ -397,7 +408,7 @@ export async function getChapterPreview(
 ): Promise<{ html: string; warning?: string }> {
   if (chapter.state === 'simplified') {
     const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
-    const hydrated = await hydrateDocImages(bookId, doc)
+    const hydrated = await hydrateDocImages(bookId, doc, 'data')
     const heading = exportChapterHeading(chapter.spineIndex, chapter.title)
     return { html: docToXhtml(withChapterHeading(hydrated, heading), heading) }
   }
@@ -407,7 +418,9 @@ export async function getChapterPreview(
   }
   try {
     const xhtml = new TextDecoder().decode(bytes)
-    return { html: xhtml }
+    return {
+      html: await inlineRelativeImages(xhtml, chapter.href, (path) => db.getEntry(bookId, path)),
+    }
   } catch {
     return { html: '<p></p>', warning: '本章尚未编辑，预览可能不完整' }
   }

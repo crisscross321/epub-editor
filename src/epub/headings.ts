@@ -106,15 +106,6 @@ export function splitDocByH1(doc: TiptapDoc, fallbackTitle: string): ChapterSlic
 
 export function ensureLeadingH1(doc: TiptapDoc, title: string): TiptapDoc {
   const name = displayChapterName(title)
-  const content = doc.content ?? []
-  if (isH1(content[0]) || !name) {
-    return {
-      type: 'doc',
-      content: content.length ? content : [{ type: 'paragraph' }],
-    }
-  }
-  return {
-    type: 'doc',
-    content: [h1Node(name), ...content],
-  }
+  if (!name) return withoutLeadingH1(doc)
+  return withChapterHeading(doc, name)
 }

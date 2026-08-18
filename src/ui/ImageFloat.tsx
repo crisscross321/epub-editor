@@ -3,7 +3,7 @@ import { bumpWidth, type ImageAlign } from '../images/layout'
 
 export function imageFloatStyle(rect: DOMRect): CSSProperties {
   const top = rect.top > 130 ? rect.top - 56 : rect.bottom + 8
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - 300))
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - 360))
   return { position: 'fixed', top, left }
 }
 
@@ -12,6 +12,7 @@ export function ImageFloat(props: {
   align: ImageAlign
   onWidth: (width: number) => void
   onAlign: (align: ImageAlign) => void
+  onDelete: () => void
   style?: CSSProperties
 }) {
   return (
@@ -48,6 +49,9 @@ export function ImageFloat(props: {
         onClick={() => props.onAlign('right')}
       >
         居右
+      </button>
+      <button type="button" className="is-danger" onClick={props.onDelete}>
+        删除
       </button>
     </div>
   )

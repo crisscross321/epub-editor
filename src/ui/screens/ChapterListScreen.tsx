@@ -100,7 +100,7 @@ export function ChapterListScreen(props: {
               ↓
             </button>
             <button className="btn btn-ghost" type="button" onClick={() => props.onInsert(ch.id)}>
-              插入
+              新增
             </button>
             <button
               className="icon-btn icon-danger"

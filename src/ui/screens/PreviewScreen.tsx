@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getChapterPreview } from '../../app/bookService'
 import { exportChapterHeading } from '../../epub/headings'
 import type { BookRecord } from '../../types/book'
+import { tightenBlankHtml } from '../blankLines'
 
 const PREVIEW_STYLE = `<style>
   html, body {
@@ -18,15 +19,51 @@ const PREVIEW_STYLE = `<style>
   h2 { font-size: 1.4em; }
   h3 { font-size: 1.22em; }
   p { margin: 0 0 0.8em; }
+  body > div { margin: 0 0 0.8em; }
+  p.is-blank, div.is-blank {
+    line-height: 0.8em;
+    min-height: 0;
+    height: 0.8em;
+    margin: 0;
+    overflow: hidden;
+  }
+  p.is-blank br, div.is-blank br { display: none; }
+  br.is-extra-break {
+    display: block;
+    height: 0.8em;
+    line-height: 0;
+    font-size: 0;
+    margin: 0;
+  }
   img { max-width: 100%; height: auto; display: block; margin: 12px auto; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet"/>`
 
-function withEditorFonts(html: string): string {
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${PREVIEW_STYLE}</head>`)
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/>${PREVIEW_STYLE}</head><body>${html}</body></html>`
+const BLANK_STYLE = `<style>
+  p.is-blank, div.is-blank {
+    line-height: 0.8em;
+    min-height: 0;
+    height: 0.8em;
+    margin: 0;
+    overflow: hidden;
+  }
+  p.is-blank br, div.is-blank br { display: none; }
+  br.is-extra-break {
+    display: block;
+    height: 0.8em;
+    line-height: 0;
+    font-size: 0;
+    margin: 0;
+  }
+</style>`
+
+function withPreviewChrome(html: string, matchEditor: boolean): string {
+  const tightened = tightenBlankHtml(html)
+  const extra = matchEditor ? PREVIEW_STYLE : BLANK_STYLE
+  if (/<\/head>/i.test(tightened)) return tightened.replace(/<\/head>/i, `${extra}</head>`)
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/>${extra}</head><body>${tightened}</body></html>`
 }
 
 export function PreviewScreen(props: { book: BookRecord }) {
@@ -42,7 +79,7 @@ export function PreviewScreen(props: { book: BookRecord }) {
     let cancelled = false
     getChapterPreview(props.book.id, chapter).then((result) => {
       if (cancelled) return
-      setHtml(chapter.state === 'simplified' ? withEditorFonts(result.html) : result.html)
+      setHtml(withPreviewChrome(result.html, chapter.state === 'simplified'))
       setWarning(result.warning)
     })
     return () => {

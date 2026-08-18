@@ -6,6 +6,7 @@ import { docToXhtml } from '../../epub/serialize'
 import { replaceAllInDoc } from '../../epub/replace'
 import { applyImageLayout, readImageLayout, type ImageAlign } from '../../images/layout'
 import type { TiptapDoc } from '../../types/book'
+import { markBlankBlocks } from '../blankLines'
 import { EditorToolbar, type FormatKind, type HeadingLevel } from '../EditorToolbar'
 import { FindReplaceBar } from '../FindReplaceBar'
 import { ImageFloat, imageFloatStyle } from '../ImageFloat'
@@ -37,6 +38,7 @@ export function SimpleEditor(props: {
     const el = surface.current
     if (!el) return
     el.innerHTML = toInnerHtml(props.doc)
+    markBlankBlocks(el)
     setPicked(null)
     // chapter switch only
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -76,7 +78,9 @@ export function SimpleEditor(props: {
   }, [picked])
 
   const emitChange = () => {
-    const html = surface.current?.innerHTML || '<p></p>'
+    const el = surface.current
+    if (el) markBlankBlocks(el)
+    const html = el?.innerHTML || '<p></p>'
     props.onChange(simplifyXhtml(`<div>${html}</div>`, (src) => src))
   }
 
@@ -111,6 +115,13 @@ export function SimpleEditor(props: {
     applyImageLayout(picked, width, align)
     emitChange()
     setTick((n) => n + 1)
+  }
+
+  const deletePicked = () => {
+    if (!picked) return
+    picked.remove()
+    markPicked(null)
+    emitChange()
   }
 
   const cmd = (command: string) => {
@@ -162,7 +173,10 @@ export function SimpleEditor(props: {
             onReplaceAll={(search, replacement) => {
               const { doc, count } = replaceAllInDoc(currentDoc(), search, replacement)
               const el = surface.current
-              if (el) el.innerHTML = toInnerHtml(doc)
+              if (el) {
+              el.innerHTML = toInnerHtml(doc)
+              markBlankBlocks(el)
+            }
               props.onChange(doc)
               return count
             }}
@@ -190,6 +204,7 @@ export function SimpleEditor(props: {
           align={readImageLayout(picked).align}
           onWidth={(width) => layoutPicked(width, readImageLayout(picked).align)}
           onAlign={(align) => layoutPicked(readImageLayout(picked).width, align)}
+          onDelete={deletePicked}
           style={imageFloatStyle(picked.getBoundingClientRect())}
         />
       ) : null}

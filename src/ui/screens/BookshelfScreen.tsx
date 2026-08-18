@@ -32,9 +32,11 @@ export function BookshelfScreen(props: {
                   {book.author || '未署名'} · {new Date(book.updatedAt).toLocaleString('zh-CN')}
                 </div>
               </button>
-              <button className="btn btn-ghost" type="button" onClick={() => props.onDelete(book.id)}>
-                删除应用内副本
-              </button>
+              <div className="book-card-actions">
+                <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onDelete(book.id)}>
+                  删除存档
+                </button>
+              </div>
             </article>
           ))
         )}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ensureLeadingH1,
   exportChapterHeading,
   splitDocByH1,
   stripChapterOrdinal,
@@ -28,6 +29,32 @@ describe('chapter heading', () => {
   it('strips leading h1 for export rewriting', () => {
     const body = withoutLeadingH1(sample)
     expect(body.content?.[0]?.type).toBe('paragraph')
+  })
+})
+
+describe('ensureLeadingH1', () => {
+  it('replaces a leftover leading h1 with the chapter list title', () => {
+    const synced = ensureLeadingH1(sample, '新名')
+    expect(JSON.stringify(synced.content?.[0])).toContain('新名')
+    expect(JSON.stringify(synced.content?.[0])).not.toContain('旧名')
+    expect(JSON.stringify(synced)).toContain('你好世界')
+  })
+
+  it('inserts a leading h1 when the chapter body has none', () => {
+    const body: TiptapDoc = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: '正文' }] }],
+    }
+    const synced = ensureLeadingH1(body, '开篇')
+    expect(synced.content?.[0]).toMatchObject({ type: 'heading', attrs: { level: 1 } })
+    expect(JSON.stringify(synced.content?.[0])).toContain('开篇')
+    expect(JSON.stringify(synced)).toContain('正文')
+  })
+
+  it('does not invent an h1 when the chapter list name is empty', () => {
+    const synced = ensureLeadingH1(sample, '')
+    expect(synced.content?.[0]?.type).toBe('paragraph')
+    expect(JSON.stringify(synced)).not.toContain('旧名')
   })
 })
 

@@ -6,6 +6,7 @@ import { findInRoot } from '../../editor/find'
 import { editorExtensions } from '../../editor/schema'
 import { replaceAllInDoc } from '../../epub/replace'
 import { clampWidth, type ImageAlign } from '../../images/layout'
+import { markBlankBlocks } from '../blankLines'
 import { EditorToolbar } from '../EditorToolbar'
 import { FindReplaceBar } from '../FindReplaceBar'
 import { ImageFloat, imageFloatStyle } from '../ImageFloat'
@@ -99,11 +100,15 @@ function TipTapEditor(props: {
     }
     editor.on('selectionUpdate', sync)
     editor.on('transaction', sync)
+    const markBlanks = () => markBlankBlocks(editor.view.dom)
+    markBlanks()
+    editor.on('transaction', markBlanks)
     window.addEventListener('scroll', sync, true)
     window.addEventListener('resize', sync)
     return () => {
       editor.off('selectionUpdate', sync)
       editor.off('transaction', sync)
+      editor.off('transaction', markBlanks)
       window.removeEventListener('scroll', sync, true)
       window.removeEventListener('resize', sync)
     }
@@ -165,6 +170,7 @@ function TipTapEditor(props: {
           align={imageSel.align}
           onWidth={(width) => editor.chain().updateAttributes('image', { width }).run()}
           onAlign={(align) => editor.chain().updateAttributes('image', { align }).run()}
+          onDelete={() => editor.chain().focus().deleteSelection().run()}
           style={imageFloatStyle(imageSel.rect)}
         />
       ) : null}
