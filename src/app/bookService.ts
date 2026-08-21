@@ -1,5 +1,8 @@
 import type { BookRecord, ChapterIndex, TiptapDoc, TiptapNode } from '../types/book'
+import { findHits, textFromDoc, textFromHtml } from '../content/text'
+import { splitImportedText } from '../editor/importText'
 import { toArrayBuffer, bytesToDataUrl } from '../epub/bytes'
+import { checkExport } from '../epub/exportCheck'
 import { messageForUnknown } from '../epub/errors'
 import { parseEpub } from '../epub/parse'
 import { dirname, extname, joinPath } from '../epub/paths'
@@ -10,6 +13,8 @@ import {
   splitDocByH1,
   withChapterHeading,
 } from '../epub/headings'
+import { analyzeSimplifyLoss, emptyLoss } from '../epub/loss'
+import { replaceAllInDoc } from '../epub/replace'
 import { emptyDoc, simplifyXhtml } from '../epub/simplify'
 import { inlineRelativeImages } from '../epub/previewImages'
 import { compressImage } from '../images/compress'
@@ -69,6 +74,7 @@ export async function createBook(): Promise<BookRecord> {
     author: '',
     language: 'zh-CN',
     updatedAt: now(),
+    addedAt: now(),
     opfHref: 'OEBPS/content.opf',
     chapters: [
       {
@@ -94,6 +100,7 @@ export async function importEpub(buf: ArrayBuffer, sourceName: string): Promise<
     author: parsed.author,
     language: parsed.language,
     updatedAt: now(),
+    addedAt: now(),
     sourceName,
     opfHref: parsed.opfHref,
     coverPath: parsed.coverHref,
@@ -424,6 +431,233 @@ export async function getChapterPreview(
   } catch {
     return { html: '<p></p>', warning: '本章尚未编辑，预览可能不完整' }
   }
+}
+
+export async function saveProgress(
+  bookId: string,
+  chapterId: string,
+  offset: number,
+): Promise<BookRecord> {
+  const book = await getBook(bookId)
+  const next = {
+    ...book,
+    readChapterId: chapterId,
+    readOffset: Math.min(1, Math.max(0, offset)),
+    lastReadAt: now(),
+  }
+  await db.putBook(next)
+  return next
+}
+
+export async function markExported(bookId: string): Promise<BookRecord> {
+  const book = await getBook(bookId)
+  return saveBook({ ...book, lastExportedAt: now() })
+}
+
+export async function trashBook(id: string): Promise<void> {
+  const dump = await db.snapshotBook(id)
+  if (!dump) return
+  await db.putTrash(dump)
+  await db.deleteBookData(id)
+}
+
+export async function restoreBook(id: string): Promise<void> {
+  const dump = await db.getTrash(id)
+  if (!dump) throw new Error('找不到刚删除的书')
+  await db.restoreDump(dump)
+  await db.deleteTrash(id)
+}
+
+export async function purgeTrash(id: string): Promise<void> {
+  await db.deleteTrash(id)
+}
+
+export async function addAnnotation(
+  bookId: string,
+  chapterId: string,
+  kind: 'bookmark' | 'highlight' | 'note',
+  text: string,
+  note?: string,
+): Promise<void> {
+  await db.putAnnotation({
+    id: newId(),
+    bookId,
+    chapterId,
+    kind,
+    text: text.trim(),
+    note: note?.trim() || undefined,
+    createdAt: now(),
+  })
+}
+
+export async function listNotes(bookId: string) {
+  return db.listAnnotations(bookId)
+}
+
+export async function removeNote(id: string) {
+  await db.deleteAnnotation(id)
+}
+
+export async function chapterPlain(bookId: string, chapter: ChapterIndex): Promise<string> {
+  const preview = await getChapterPreview(bookId, chapter)
+  return textFromHtml(preview.html)
+}
+
+export async function isChapterEmpty(bookId: string, chapter: ChapterIndex): Promise<boolean> {
+  if (chapter.state === 'simplified') {
+    const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
+    return !textFromDoc(doc).trim()
+  }
+  return !(await chapterPlain(bookId, chapter)).trim()
+}
+
+export async function searchBook(
+  bookId: string,
+  query: string,
+): Promise<{ chapterId: string; title: string; snippet: string; index: number }[]> {
+  const book = await getBook(bookId)
+  const hits: { chapterId: string; title: string; snippet: string; index: number }[] = []
+  const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+  for (const chapter of sorted) {
+    const text = await chapterPlain(bookId, chapter)
+    for (const hit of findHits(text, query)) {
+      hits.push({
+        chapterId: chapter.id,
+        title: exportChapterHeading(chapter.spineIndex, chapter.title),
+        snippet: hit.snippet,
+        index: hit.index,
+      })
+    }
+  }
+  return hits
+}
+
+export async function replaceAllInBook(
+  bookId: string,
+  search: string,
+  replacement: string,
+): Promise<{ count: number; skipped: number }> {
+  const book = await getBook(bookId)
+  let count = 0
+  let skipped = 0
+  for (const chapter of book.chapters) {
+    if (chapter.state !== 'simplified') {
+      skipped += 1
+      continue
+    }
+    const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
+    const result = replaceAllInDoc(doc, search, replacement)
+    if (result.count) {
+      count += result.count
+      await db.putDoc(bookId, chapter.id, result.doc)
+    }
+  }
+  if (count) await saveBook(book)
+  return { count, skipped }
+}
+
+export async function mergeChapters(bookId: string, firstId: string, secondId: string): Promise<BookRecord> {
+  const book = await getBook(bookId)
+  const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+  const first = sorted.find((ch) => ch.id === firstId)
+  const second = sorted.find((ch) => ch.id === secondId)
+  if (!first || !second) throw new Error('找不到要合并的章节')
+  if (Math.abs(first.spineIndex - second.spineIndex) !== 1) throw new Error('只能合并相邻章节')
+  const keep = first.spineIndex < second.spineIndex ? first : second
+  const drop = keep.id === first.id ? second : first
+  const keepDoc = keep.state === 'simplified' ? ((await db.getDoc(bookId, keep.id)) ?? emptyDoc()) : emptyDoc()
+  const dropDoc = drop.state === 'simplified' ? ((await db.getDoc(bookId, drop.id)) ?? emptyDoc()) : emptyDoc()
+  if (keep.state !== 'simplified' || drop.state !== 'simplified') {
+    throw new Error('未编辑的章节请先打开后再合并，以免打乱原书排版')
+  }
+  const merged: TiptapDoc = {
+    type: 'doc',
+    content: [...(keepDoc.content ?? []), ...(dropDoc.content ?? [])],
+  }
+  await db.putDoc(bookId, keep.id, merged)
+  return deleteChapter(bookId, drop.id)
+}
+
+export async function moveChapterTo(bookId: string, chapterId: string, toIndex: number): Promise<BookRecord> {
+  const book = await getBook(bookId)
+  const chapters = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+  const from = chapters.findIndex((ch) => ch.id === chapterId)
+  if (from < 0) return book
+  const target = Math.min(chapters.length - 1, Math.max(0, toIndex))
+  const [item] = chapters.splice(from, 1)
+  chapters.splice(target, 0, item!)
+  return saveBook({
+    ...book,
+    chapters: chapters.map((ch, spineIndex) => ({ ...ch, spineIndex })),
+  })
+}
+
+export async function importTextBook(raw: string, filename: string): Promise<BookRecord> {
+  const chapters = splitImportedText(raw, filename)
+  const created = await createBook()
+  const title = filename.replace(/\.(txt|md|markdown)$/i, '') || created.title
+  let book = created
+  const first = book.chapters[0]
+  if (!first) return book
+  await db.putDoc(book.id, first.id, chapters[0]?.doc ?? emptyDoc())
+  book = await saveBook({
+    ...book,
+    title,
+    sourceName: filename,
+    chapters: book.chapters.map((ch, i) => (i === 0 ? { ...ch, title: chapters[0]?.title ?? '' } : ch)),
+  })
+  let afterId = first.id
+  for (const extra of chapters.slice(1)) {
+    book = await insertChapter(book.id, afterId)
+    const last = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).at(-1)
+    if (!last) continue
+    await db.putDoc(book.id, last.id, extra.doc)
+    book = await renameChapter(book.id, last.id, extra.title)
+    afterId = last.id
+  }
+  return book
+}
+
+export async function inspectExport(bookId: string) {
+  const book = await getBook(bookId)
+  const cover = await db.getBlob(bookId, 'cover')
+  const chapters = []
+  for (const chapter of [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)) {
+    chapters.push({
+      id: chapter.id,
+      title: exportChapterHeading(chapter.spineIndex, chapter.title),
+      empty: await isChapterEmpty(bookId, chapter),
+    })
+  }
+  const blobs = await db.listBlobs(bookId)
+  return checkExport({
+    title: book.title,
+    language: book.language,
+    hasCover: Boolean(cover),
+    chapters,
+    imageBytes: blobs.filter((b) => b.id !== 'cover').map((b) => b.data.byteLength),
+  })
+}
+
+export async function bookPlainChapters(bookId: string): Promise<{ title: string; body: string }[]> {
+  const book = await getBook(bookId)
+  const out: { title: string; body: string }[] = []
+  for (const chapter of [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)) {
+    out.push({
+      title: exportChapterHeading(chapter.spineIndex, chapter.title),
+      body: await chapterPlain(bookId, chapter),
+    })
+  }
+  return out
+}
+
+export async function getChapterLoss(bookId: string, chapterId: string) {
+  const book = await getBook(bookId)
+  const chapter = book.chapters.find((ch) => ch.id === chapterId)
+  if (!chapter || chapter.state !== 'pristine') return emptyLoss()
+  const bytes = await db.getEntry(bookId, chapter.href)
+  if (!bytes) return emptyLoss()
+  return analyzeSimplifyLoss(new TextDecoder().decode(bytes))
 }
 
 export { messageForUnknown }

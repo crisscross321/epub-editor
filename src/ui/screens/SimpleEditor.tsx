@@ -6,6 +6,8 @@ import { docToXhtml } from '../../epub/serialize'
 import { replaceAllInDoc } from '../../epub/replace'
 import { applyImageLayout, readImageLayout, type ImageAlign } from '../../images/layout'
 import type { TiptapDoc } from '../../types/book'
+import { countChars, textFromDoc } from '../../content/text'
+import { outlineFromDoc } from '../../editor/outline'
 import { markBlankBlocks } from '../blankLines'
 import { EditorToolbar, type FormatKind, type HeadingLevel } from '../EditorToolbar'
 import { FindReplaceBar } from '../FindReplaceBar'
@@ -28,9 +30,12 @@ export function SimpleEditor(props: {
   onImageConsumed: () => void
   onChange: (doc: TiptapDoc) => void
   onInsertImage: () => void
+  onPreview?: () => void
+  onReplaceBook?: (search: string, replacement: string) => void
 }) {
   const surface = useRef<HTMLDivElement>(null)
   const [showFind, setShowFind] = useState(false)
+  const [showOutline, setShowOutline] = useState(false)
   const [picked, setPicked] = useState<HTMLImageElement | null>(null)
   const [, setTick] = useState(0)
 
@@ -153,7 +158,20 @@ export function SimpleEditor(props: {
         onRedo={() => cmd('redo')}
         showFind={showFind}
         onToggleFind={() => setShowFind((v) => !v)}
+        showOutline={showOutline}
+        onToggleOutline={() => setShowOutline((v) => !v)}
+        onPreview={props.onPreview}
+        wordCount={countChars(textFromDoc(currentDoc()))}
       >
+        {showOutline ? (
+          <div className="outline-pop">
+            {outlineFromDoc(currentDoc()).map((item) => (
+              <button key={`${item.index}-${item.title}`} type="button">
+                {item.title}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {showFind ? (
           <FindReplaceBar
             onFind={(search) => findInRoot(surface.current, search, true)}
@@ -180,6 +198,7 @@ export function SimpleEditor(props: {
               props.onChange(doc)
               return count
             }}
+            onReplaceBook={props.onReplaceBook}
           />
         ) : null}
       </EditorToolbar>

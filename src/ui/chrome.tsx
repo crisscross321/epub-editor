@@ -2,9 +2,11 @@ import type { ReactNode } from 'react'
 
 export function Dialog(props: {
   title: string
-  body: string
+  body: ReactNode
   cancel: string
   confirm: string
+  extra?: string
+  onExtra?: () => void
   danger?: boolean
   onCancel: () => void
   onConfirm: () => void
@@ -13,11 +15,16 @@ export function Dialog(props: {
     <div className="dialog-backdrop" onClick={props.onCancel}>
       <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog">
         <h3>{props.title}</h3>
-        <p className="muted">{props.body}</p>
+        {typeof props.body === 'string' ? <p className="muted">{props.body}</p> : <div className="muted">{props.body}</div>}
         <div className="row">
           <button className="btn btn-ghost" type="button" onClick={props.onCancel}>
             {props.cancel}
           </button>
+          {props.extra && props.onExtra ? (
+            <button className="btn btn-ghost" type="button" onClick={props.onExtra}>
+              {props.extra}
+            </button>
+          ) : null}
           <button
             className={props.danger ? 'btn btn-warn' : 'btn'}
             type="button"

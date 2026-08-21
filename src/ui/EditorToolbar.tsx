@@ -13,6 +13,10 @@ export function EditorToolbar(props: {
   onRedo: () => void
   showFind: boolean
   onToggleFind: () => void
+  showOutline?: boolean
+  onToggleOutline?: () => void
+  onPreview?: () => void
+  wordCount?: number
   children?: ReactNode
 }) {
   const [formatOpen, setFormatOpen] = useState(false)
@@ -80,6 +84,17 @@ export function EditorToolbar(props: {
         <button type="button" onClick={props.onRedo}>
           重做
         </button>
+        {props.onToggleOutline ? (
+          <button type="button" className={props.showOutline ? 'is-on' : ''} onClick={props.onToggleOutline}>
+            大纲
+          </button>
+        ) : null}
+        {props.onPreview ? (
+          <button type="button" onClick={props.onPreview}>
+            预览
+          </button>
+        ) : null}
+        {typeof props.wordCount === 'number' ? <span className="wordcount">{props.wordCount} 字</span> : null}
       </div>
       {formatOpen ? (
         <div className="format-pop" role="menu" aria-label="特殊格式" onMouseDown={(e) => e.preventDefault()}>

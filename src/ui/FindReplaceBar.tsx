@@ -5,6 +5,7 @@ export function FindReplaceBar(props: {
   onFindNext: (search: string) => boolean
   onReplace: (search: string, replacement: string) => void
   onReplaceAll: (search: string, replacement: string) => number
+  onReplaceBook?: (search: string, replacement: string) => void
 }) {
   const [search, setSearch] = useState('')
   const [replacement, setReplacement] = useState('')
@@ -50,6 +51,20 @@ export function FindReplaceBar(props: {
       >
         全部替换
       </button>
+      {props.onReplaceBook ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (!search) {
+              setHint('请输入要查找的内容')
+              return
+            }
+            props.onReplaceBook?.(search, replacement)
+          }}
+        >
+          全书替换
+        </button>
+      ) : null}
       {hint ? <span className="muted">{hint}</span> : null}
     </div>
   )

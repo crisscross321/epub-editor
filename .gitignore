@@ -16,6 +16,7 @@ android/app/build
 android/build
 android/captures
 android/local.properties
+release/*.apk
 .idea
 
 # Editor directories and files

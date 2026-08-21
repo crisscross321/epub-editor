@@ -14,10 +14,41 @@ export interface BookRecord {
   author: string
   language: string
   updatedAt: string
+  addedAt?: string
   coverPath?: string
   sourceName?: string
   opfHref: string
   chapters: ChapterIndex[]
+  description?: string
+  publisher?: string
+  series?: string
+  tags?: string[]
+  starred?: boolean
+  lastExportedAt?: string
+  lastReadAt?: string
+  readChapterId?: string
+  readOffset?: number
+}
+
+export type AnnotationKind = 'bookmark' | 'highlight' | 'note'
+
+export interface Annotation {
+  id: string
+  bookId: string
+  chapterId: string
+  kind: AnnotationKind
+  text: string
+  note?: string
+  createdAt: string
+}
+
+export interface TrashDump {
+  id: string
+  book: BookRecord
+  entries: { path: string; data: Uint8Array }[]
+  docs: { chapterId: string; doc: TiptapDoc }[]
+  blobs: { id: string; data: Uint8Array; mime: string }[]
+  trashedAt: string
 }
 
 export interface ParsedEpub {

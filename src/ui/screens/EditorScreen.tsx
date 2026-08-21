@@ -2,6 +2,8 @@ import { Capacitor } from '@capacitor/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { useEffect, useState } from 'react'
 import type { TiptapDoc } from '../../types/book'
+import { countChars, textFromDoc } from '../../content/text'
+import { outlineFromDoc } from '../../editor/outline'
 import { findInRoot } from '../../editor/find'
 import { editorExtensions } from '../../editor/schema'
 import { replaceAllInDoc } from '../../epub/replace'
@@ -19,6 +21,8 @@ export function EditorScreen(props: {
   onImageConsumed: () => void
   onChange: (doc: TiptapDoc) => void
   onInsertImage: () => void
+  onPreview?: () => void
+  onReplaceBook?: (search: string, replacement: string) => void
 }) {
   if (Capacitor.getPlatform() === 'android') {
     return <SimpleEditor {...props} />
@@ -33,8 +37,11 @@ function TipTapEditor(props: {
   onImageConsumed: () => void
   onChange: (doc: TiptapDoc) => void
   onInsertImage: () => void
+  onPreview?: () => void
+  onReplaceBook?: (search: string, replacement: string) => void
 }) {
   const [showFind, setShowFind] = useState(false)
+  const [showOutline, setShowOutline] = useState(false)
   const [imageSel, setImageSel] = useState<{ width: number; align: ImageAlign; rect: DOMRect } | null>(null)
   const editor = useEditor({
     immediatelyRender: false,
@@ -140,7 +147,32 @@ function TipTapEditor(props: {
         onRedo={() => editor.chain().focus().redo().run()}
         showFind={showFind}
         onToggleFind={() => setShowFind((v) => !v)}
+        showOutline={showOutline}
+        onToggleOutline={() => setShowOutline((v) => !v)}
+        onPreview={props.onPreview}
+        wordCount={countChars(textFromDoc(editor.getJSON() as TiptapDoc))}
       >
+        {showOutline ? (
+          <div className="outline-pop">
+            {outlineFromDoc(editor.getJSON() as TiptapDoc).map((item) => (
+              <button
+                key={`${item.index}-${item.title}`}
+                type="button"
+                onClick={() => {
+                  const node = editor.state.doc.child(item.index)
+                  let offset = 0
+                  editor.state.doc.forEach((child, childPos) => {
+                    if (child === node) offset = childPos
+                  })
+                  editor.commands.focus()
+                  editor.commands.setTextSelection(offset + 1)
+                }}
+              >
+                {item.title}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {showFind ? (
           <FindReplaceBar
             onFind={(search) => findInRoot(editor.view.dom, search, true)}
@@ -160,6 +192,7 @@ function TipTapEditor(props: {
               props.onChange(doc)
               return count
             }}
+            onReplaceBook={props.onReplaceBook}
           />
         ) : null}
       </EditorToolbar>

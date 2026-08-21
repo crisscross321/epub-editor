@@ -23,6 +23,10 @@ export function pickFile(accept: string): Promise<File | null> {
   })
 }
 
+export function pickTextFile(): Promise<File | null> {
+  return pickFile('.txt,.md,text/plain,text/markdown')
+}
+
 export function pickEpubFile(): Promise<File | null> {
   return pickFile('.epub,application/epub+zip')
 }
@@ -31,9 +35,9 @@ export function pickImageFile(): Promise<File | null> {
   return pickFile('image/*')
 }
 
-function safeFilename(name: string): string {
+function safeFilename(name: string, ext: string): string {
   const trimmed = name.replace(/[\\/:*?"<>|]+/g, '_').trim() || '未命名'
-  return trimmed.toLowerCase().endsWith('.epub') ? trimmed : `${trimmed}.epub`
+  return trimmed.toLowerCase().endsWith(`.${ext}`) ? trimmed : `${trimmed}.${ext}`
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -46,8 +50,13 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-export async function saveEpubToUser(filename: string, bytes: Uint8Array): Promise<string> {
-  const name = safeFilename(filename)
+export async function saveBytesToUser(
+  filename: string,
+  bytes: Uint8Array,
+  mime: string,
+  ext: string,
+): Promise<string> {
+  const name = safeFilename(filename, ext)
   const { Capacitor } = await import('@capacitor/core')
   if (Capacitor.getPlatform() === 'android') {
     const { Directory, Filesystem } = await import('@capacitor/filesystem')
@@ -65,15 +74,15 @@ export async function saveEpubToUser(filename: string, bytes: Uint8Array): Promi
         title: name,
         text: name,
         url: uri.uri,
-        dialogTitle: '保存或分享 EPUB',
+        dialogTitle: '保存或分享',
       })
       return `导出成功。请在弹出的菜单里选「文件」「下载」或微信等，把《${name}》存到你找得到的位置。`
     } catch {
-      return `文件已生成，但分享菜单被取消或无法打开。请再点一次「导出 EPUB」。`
+      return `文件已生成，但分享菜单被取消或无法打开。请再点一次导出。`
     }
   }
 
-  const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/epub+zip' })
+  const blob = new Blob([toArrayBuffer(bytes)], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -81,4 +90,8 @@ export async function saveEpubToUser(filename: string, bytes: Uint8Array): Promi
   a.click()
   URL.revokeObjectURL(url)
   return `已开始下载《${name}》，请到浏览器的下载列表里查看。`
+}
+
+export async function saveEpubToUser(filename: string, bytes: Uint8Array): Promise<string> {
+  return saveBytesToUser(filename, bytes, 'application/epub+zip', 'epub')
 }
