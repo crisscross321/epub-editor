@@ -38,7 +38,7 @@ export function Dialog(props: {
   )
 }
 
-export function TopBar(props: { onBack?: () => void; title?: string; right?: ReactNode }) {
+export function TopBar(props: { onBack?: () => void; title?: string; slogan?: string; right?: ReactNode }) {
   return (
     <header className="topbar">
       {props.onBack ? (
@@ -46,13 +46,12 @@ export function TopBar(props: { onBack?: () => void; title?: string; right?: Rea
           ←
         </button>
       ) : (
-        <span className="brand">素笺</span>
+        <span className="brand-lockup">
+          <span className="brand">素笺</span>
+          {props.slogan ? <span className="brand-slogan">{props.slogan}</span> : null}
+        </span>
       )}
-      {props.title ? (
-        <strong style={{ flex: 1, fontFamily: 'var(--serif)' }}>{props.title}</strong>
-      ) : (
-        <span style={{ flex: 1 }} />
-      )}
+      {props.title ? <strong className="topbar-title">{props.title}</strong> : null}
       {props.right}
     </header>
   )

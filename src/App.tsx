@@ -24,6 +24,7 @@ import { Onboarding } from './ui/screens/Onboarding'
 import { PreviewScreen } from './ui/screens/PreviewScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { bindKeyboardReveal } from './ui/keepFocusVisible'
+import { nextStarred } from './ui/selection'
 
 type Route =
   | { name: 'shelf' }
@@ -45,7 +46,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [undo, setUndo] = useState<{ id: string; title: string } | null>(null)
+  const [undo, setUndo] = useState<{ ids: string[]; title: string } | null>(null)
   const [confirm, setConfirm] = useState<null | {
     title: string
     body: ReactNode
@@ -469,7 +470,20 @@ export default function App() {
 
   return (
     <div className={route.name === 'preview' ? 'app app-preview' : 'app'}>
-      {hideTop ? null : <TopBar onBack={route.name === 'shelf' ? undefined : goBack} title={title} />}
+      {hideTop ? null : (
+        <TopBar
+          onBack={route.name === 'shelf' ? undefined : goBack}
+          title={title}
+          slogan={route.name === 'shelf' ? '写在脑海里的书，装进EPUB里存下。' : undefined}
+          right={
+            route.name === 'shelf' ? (
+              <button className="btn btn-bubble btn-compact" type="button" onClick={() => setRoute({ name: 'settings' })}>
+                设置
+              </button>
+            ) : undefined
+          }
+        />
+      )}
       {notice ? (
         <div className={notice.kind === 'ok' ? 'banner banner-ok' : 'banner'} role="status">
           {notice.text}
@@ -509,27 +523,35 @@ export default function App() {
           onCreate={() => void onCreate()}
           onImport={() => void onImport()}
           onImportText={() => void onImportText()}
-          onStar={(id) => {
-            const target = list.find((item) => item.id === id)
-            if (!target) return
-            void books.saveBook({ ...target, starred: !target.starred }).then(refreshShelf).catch(fail)
+          onStar={(ids) => {
+            const targets = list.filter((item) => ids.includes(item.id))
+            if (targets.length === 0) return
+            const starred = nextStarred(targets, ids)
+            void Promise.all(targets.map((item) => books.saveBook({ ...item, starred })))
+              .then(refreshShelf)
+              .catch(fail)
           }}
-          onDelete={(id) =>
+          onDelete={(ids) =>
             setConfirm({
-              title: '删除这本书？',
+              title: ids.length > 1 ? `删除这 ${ids.length} 本书？` : '删除这本书？',
               body: '只删除应用里的副本。你另存到系统目录的 EPUB 还在。删除后 10 秒内可以撤销。',
               confirm: '删除',
               danger: true,
               action: () => {
                 setConfirm(null)
-                const target = list.find((item) => item.id === id)
-                void books
-                  .trashBook(id)
+                const targets = list.filter((item) => ids.includes(item.id))
+                void Promise.all(ids.map((id) => books.trashBook(id)))
                   .then(() => {
-                    setUndo({ id, title: target?.title || '未命名' })
+                    setUndo({
+                      ids,
+                      title:
+                        ids.length > 1
+                          ? `${ids.length} 本书`
+                          : targets[0]?.title || '未命名',
+                    })
                     if (undoTimer.current) window.clearTimeout(undoTimer.current)
                     undoTimer.current = window.setTimeout(() => {
-                      void books.purgeTrash(id)
+                      void Promise.all(ids.map((id) => books.purgeTrash(id)))
                       setUndo(null)
                     }, 10_000)
                     return refreshShelf()
@@ -541,9 +563,11 @@ export default function App() {
           onUndo={() => {
             if (!undo) return
             if (undoTimer.current) window.clearTimeout(undoTimer.current)
-            void books.restoreBook(undo.id).then(refreshShelf).then(() => setUndo(null)).catch(fail)
+            void Promise.all(undo.ids.map((id) => books.restoreBook(id)))
+              .then(refreshShelf)
+              .then(() => setUndo(null))
+              .catch(fail)
           }}
-          onSettings={() => setRoute({ name: 'settings' })}
         />
       ) : null}
 
@@ -558,6 +582,7 @@ export default function App() {
             else next.add(id)
             setSelected(next)
           }}
+          onClearSelect={() => setSelected(new Set())}
           onMeta={(patch) => void books.saveBook({ ...book, ...patch }).then(setBook).catch(fail)}
           onCover={async () => {
             const file = await pickImageFile()
@@ -623,18 +648,17 @@ export default function App() {
             if (!Number.isFinite(n)) return
             void books.moveChapterTo(book.id, id, n - 1).then(setBook).catch(fail)
           }}
-          onReplaceAll={() => {
-            const search = window.prompt('全书查找')
-            if (!search) return
-            const replacement = window.prompt('替换为', '') ?? ''
-            void books.replaceAllInBook(book.id, search, replacement).then((result) => {
-              setNotice({
-                kind: 'ok',
-                text: `已替换 ${result.count} 处${result.skipped ? `，${result.skipped} 章尚未编辑未改动` : ''}`,
+          onReplaceAll={(search, replacement) =>
+            books
+              .replaceAllInBook(book.id, search, replacement)
+              .then(async (result) => {
+                await loadBook(book.id)
+                return result
               })
-              return loadBook(book.id)
-            }).catch(fail)
-          }}
+              .catch((err) => {
+                fail(err)
+              })
+          }
         />
       ) : null}
 

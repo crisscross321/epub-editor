@@ -1,7 +1,18 @@
+import { useEffect, useRef, useState } from 'react'
 import { coverHue } from '../../app/progress'
 import { bookProgress } from '../../app/sortBooks'
 import type { ShelfSort, ShelfView } from '../../storage/settings'
 import type { BookRecord } from '../../types/book'
+import { LONG_PRESS_MS, nextStarred, toggleSelected } from '../selection'
+
+function SearchIcon() {
+  return (
+    <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 16l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
 
 function Cover(props: { book: BookRecord; url?: string | null }) {
   if (props.url) return <img className="cover" src={props.url} alt="" />
@@ -30,21 +41,70 @@ export function BookshelfScreen(props: {
   onCreate: () => void
   onImport: () => void
   onImportText: () => void
-  onDelete: (id: string) => void
-  onStar: (id: string) => void
+  onDelete: (ids: string[]) => void
+  onStar: (ids: string[]) => void
   onUndo?: () => void
-  onSettings: () => void
 }) {
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const pressTimer = useRef<number | null>(null)
+  const longPressed = useRef(false)
+
+  useEffect(() => {
+    setSelecting(false)
+    setPicked(new Set())
+  }, [props.view])
+
+  useEffect(() => {
+    const live = new Set(props.books.map((book) => book.id))
+    setPicked((prev) => {
+      const next = new Set([...prev].filter((id) => live.has(id)))
+      if (next.size === 0) setSelecting(false)
+      return next
+    })
+  }, [props.books])
+
+  const clearPress = () => {
+    if (pressTimer.current) {
+      window.clearTimeout(pressTimer.current)
+      pressTimer.current = null
+    }
+  }
+
+  const startPress = (id: string) => {
+    longPressed.current = false
+    clearPress()
+    pressTimer.current = window.setTimeout(() => {
+      longPressed.current = true
+      setSelecting(true)
+      setPicked((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+    }, LONG_PRESS_MS)
+  }
+
+  const onTileClick = (id: string) => {
+    if (longPressed.current) {
+      longPressed.current = false
+      return
+    }
+    if (selecting) {
+      const next = toggleSelected(picked, id)
+      setPicked(next)
+      if (next.size === 0) setSelecting(false)
+      return
+    }
+    props.onOpen(id)
+  }
+
+  const ids = [...picked]
+  const starLabel = nextStarred(props.books, ids) ? '收藏' : '取消收藏'
+
   return (
-    <div className="screen">
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-        <p className="muted" style={{ margin: 0 }}>
-          写在纸上的书，装进 EPUB 里带走。
+    <div className={selecting ? 'screen screen-selecting' : 'screen'}>
+      {selecting ? (
+        <p className="muted" style={{ margin: '0 0 8px' }}>
+          已选 {picked.size} 本
         </p>
-        <button className="btn btn-ghost btn-compact" type="button" onClick={props.onSettings}>
-          设置
-        </button>
-      </div>
+      ) : null}
 
       {props.backupCount > 0 ? (
         <div className="banner">
@@ -61,7 +121,7 @@ export function BookshelfScreen(props: {
         </div>
       ) : null}
 
-      {props.continueBook ? (
+      {props.continueBook && !selecting ? (
         <button className="continue-card" type="button" onClick={props.onContinue}>
           <Cover book={props.continueBook} url={props.covers[props.continueBook.id]} />
           <div>
@@ -87,12 +147,15 @@ export function BookshelfScreen(props: {
         </button>
       </div>
 
-      <input
-        className="search-input"
-        value={props.query}
-        placeholder="搜索书名或作者"
-        onChange={(e) => props.onQuery(e.target.value)}
-      />
+      <label className="search-wrap">
+        <SearchIcon />
+        <input
+          className="search-input"
+          value={props.query}
+          placeholder="搜索书名或作者"
+          onChange={(e) => props.onQuery(e.target.value)}
+        />
+      </label>
 
       <div className="row" style={{ margin: '10px 0 16px' }}>
         {(
@@ -122,8 +185,26 @@ export function BookshelfScreen(props: {
       ) : props.view === 'grid' ? (
         <div className="shelf-grid">
           {props.books.map((book) => (
-            <button key={book.id} className="shelf-tile" type="button" onClick={() => props.onOpen(book.id)}>
-              <Cover book={book} url={props.covers[book.id]} />
+            <button
+              key={book.id}
+              className={picked.has(book.id) ? 'shelf-tile is-picked' : 'shelf-tile'}
+              type="button"
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                startPress(book.id)
+              }}
+              onPointerUp={clearPress}
+              onPointerCancel={clearPress}
+              onPointerMove={(e) => {
+                if (Math.abs(e.movementX) + Math.abs(e.movementY) > 12) clearPress()
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              onClick={() => onTileClick(book.id)}
+            >
+              <span className="shelf-cover-wrap">
+                <Cover book={book} url={props.covers[book.id]} />
+                {selecting ? <span className={picked.has(book.id) ? 'pick-mark is-on' : 'pick-mark'} /> : null}
+              </span>
               <strong>{book.title || '未命名'}</strong>
               <span className="muted">{book.author || '未署名'}</span>
               {book.starred ? <span className="star">收藏</span> : null}
@@ -147,16 +228,47 @@ export function BookshelfScreen(props: {
               </div>
             </button>
             <div className="book-card-actions">
-              <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onStar(book.id)}>
+              <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onStar([book.id])}>
                 {book.starred ? '取消收藏' : '收藏'}
               </button>
-              <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onDelete(book.id)}>
+              <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onDelete([book.id])}>
                 删除存档
               </button>
             </div>
           </article>
         ))
       )}
+
+      {selecting ? (
+        <div className="shelf-actionbar">
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={() => {
+              setSelecting(false)
+              setPicked(new Set())
+            }}
+          >
+            取消
+          </button>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            disabled={ids.length === 0}
+            onClick={() => props.onStar(ids)}
+          >
+            {starLabel}
+          </button>
+          <button
+            className="btn btn-warn"
+            type="button"
+            disabled={ids.length === 0}
+            onClick={() => props.onDelete(ids)}
+          >
+            删除存档
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
