@@ -29,3 +29,9 @@ release/*.apk
 *.njsproj
 *.sln
 *.sw?
+
+# Agent scratch (plans, specs, session notes) — not product docs
+docs/superpowers/
+.workbuddy/
+.cursor/
+.claude/
