@@ -120,7 +120,7 @@ describe('ChapterListScreen layout', () => {
     expect(container.querySelector('.book-replace input[placeholder="替换内容"]')).toBeTruthy()
     expect(container.querySelectorAll('.chapter-card').length).toBe(2)
     expect(container.querySelectorAll('.book-head .field-inline').length).toBe(3)
-    expect(container.querySelector('.book-head textarea')).toBeNull()
+    expect(container.querySelector('.book-head textarea')?.getAttribute('rows')).toBe('2')
   })
 
   it('runs book-wide replace from the inline fields', async () => {

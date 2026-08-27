@@ -96,9 +96,10 @@ export function ChapterListScreen(props: {
                 <label>作者</label>
                 <input value={props.book.author} onChange={(e) => props.onMeta({ author: e.target.value })} />
               </div>
-              <div className="field field-inline">
+              <div className="field field-inline field-abstract">
                 <label>摘要</label>
-                <input
+                <textarea
+                  rows={2}
                   value={props.book.description ?? ''}
                   onChange={(e) => props.onMeta({ description: e.target.value })}
                 />

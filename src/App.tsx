@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { BookRecord, TiptapDoc } from './types/book'
 import * as books from './app/bookService'
+import { editorBackRoute, previewBackTarget, type Route } from './app/nav'
 import { needsBackupReminder } from './app/progress'
 import { filterBooks, sortBooks } from './app/sortBooks'
 import { exportChapterHeading, splitDocByH1 } from './epub/headings'
@@ -25,14 +26,6 @@ import { PreviewScreen } from './ui/screens/PreviewScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { bindKeyboardReveal } from './ui/keepFocusVisible'
 import { nextStarred } from './ui/selection'
-
-type Route =
-  | { name: 'shelf' }
-  | { name: 'chapters'; bookId: string }
-  | { name: 'editor'; bookId: string; chapterId: string; from?: 'preview' | 'chapters' }
-  | { name: 'preview'; bookId: string; chapterId?: string; from?: 'editor' | 'chapters' }
-  | { name: 'settings'; bookId?: string }
-  | { name: 'info'; bookId: string }
 
 export default function App() {
   const [route, setRoute] = useState<Route>({ name: 'shelf' })
@@ -151,10 +144,7 @@ export default function App() {
     }
     const current = routeRef.current
     if (current.name === 'editor') {
-      const next: Route =
-        current.from === 'preview'
-          ? { name: 'preview', bookId: current.bookId, chapterId: current.chapterId, from: 'editor' }
-          : { name: 'chapters', bookId: current.bookId }
+      const next = editorBackRoute(current)
       setConfirm({
         title: '离开编辑？',
         body: '确定返回？修改会自动保存。',
@@ -167,7 +157,7 @@ export default function App() {
       return
     }
     if (current.name === 'preview') {
-      if (current.from === 'editor') {
+      if (previewBackTarget(current) === 'editor') {
         void openChapter(current.chapterId || bookRef.current?.readChapterId || '', 'preview')
         return
       }

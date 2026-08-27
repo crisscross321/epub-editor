@@ -23,6 +23,14 @@ function run(command: string, value?: string) {
   document.execCommand(command, false, value)
 }
 
+function commandState(command: string): boolean {
+  return typeof document.queryCommandState === 'function' && document.queryCommandState(command)
+}
+
+function commandValue(command: string): string {
+  return typeof document.queryCommandValue === 'function' ? document.queryCommandValue(command) : ''
+}
+
 export function SimpleEditor(props: {
   docKey: string
   doc: TiptapDoc
@@ -96,16 +104,16 @@ export function SimpleEditor(props: {
   }
 
   const headingOn = (level: HeadingLevel) => {
-    const block = document.queryCommandValue('formatBlock').toLowerCase()
+    const block = commandValue('formatBlock').toLowerCase()
     if (level === 0) return block === 'p' || block === 'div' || block === ''
     return block === `h${level}`
   }
 
   const formatOn = (kind: FormatKind) => {
-    if (kind === 'bold') return document.queryCommandState('bold')
-    if (kind === 'italic') return document.queryCommandState('italic')
-    if (kind === 'bulletList') return document.queryCommandState('insertUnorderedList')
-    return document.queryCommandState('insertOrderedList')
+    if (kind === 'bold') return commandState('bold')
+    if (kind === 'italic') return commandState('italic')
+    if (kind === 'bulletList') return commandState('insertUnorderedList')
+    return commandState('insertOrderedList')
   }
 
   const heading = (level: HeadingLevel) => {
@@ -166,7 +174,22 @@ export function SimpleEditor(props: {
         {showOutline ? (
           <div className="outline-pop">
             {outlineFromDoc(currentDoc()).map((item) => (
-              <button key={`${item.index}-${item.title}`} type="button">
+              <button
+                key={`${item.index}-${item.title}`}
+                type="button"
+                onClick={() => {
+                  const block = surface.current?.children[item.index]
+                  if (!(block instanceof HTMLElement)) return
+                  block.scrollIntoView({ block: 'start' })
+                  const range = document.createRange()
+                  range.selectNodeContents(block)
+                  range.collapse(true)
+                  window.getSelection()?.removeAllRanges()
+                  window.getSelection()?.addRange(range)
+                  surface.current?.focus()
+                  setShowOutline(false)
+                }}
+              >
                 {item.title}
               </button>
             ))}
@@ -192,9 +215,9 @@ export function SimpleEditor(props: {
               const { doc, count } = replaceAllInDoc(currentDoc(), search, replacement)
               const el = surface.current
               if (el) {
-              el.innerHTML = toInnerHtml(doc)
-              markBlankBlocks(el)
-            }
+                el.innerHTML = toInnerHtml(doc)
+                markBlankBlocks(el)
+              }
               props.onChange(doc)
               return count
             }}

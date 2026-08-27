@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import * as books from '../../app/bookService'
 import { readingPercent } from '../../app/progress'
 import { countChars, readingMinutes, textFromHtml } from '../../content/text'
@@ -8,16 +8,31 @@ import { sanitizeHtml } from '../../epub/sanitize'
 import { outlineFromXhtml } from '../../epub/toc'
 import { highlightQuery } from '../../reader/highlight'
 import { readerBodyCss } from '../../reader/style'
+import {
+  chapterIdAtScroll,
+  chapterWindow,
+  offsetInChapter,
+  readChapterBoxes,
+  scrollDeltaForWindowShift,
+  scrollTopForOffset,
+} from '../../reader/stream'
 import { fontSizePx, type AppSettings } from '../../storage/settings'
 import type { Annotation, BookRecord } from '../../types/book'
 import { tightenBlankHtml } from '../blankLines'
 
-function wrapChapter(html: string, heading: string, css: string, highlight: string): string {
+function chapterPreviewBody(html: string, heading: string, highlight: string): string {
   const tightened = tightenBlankHtml(html)
   const body = tightened.replace(/<\/?html[^>]*>/gi, '').replace(/<\/?head[\s\S]*?<\/head>/gi, '').replace(/<\/?body[^>]*>/gi, '')
   const title = shouldRenderOuterTitle(tightened, heading) ? `<h1>${heading}</h1>` : ''
-  const marked = highlightQuery(sanitizeHtml(`${title}${body}`), highlight)
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>${css}</style></head><body>${marked}</body></html>`
+  return highlightQuery(sanitizeHtml(`${title}${body}`), highlight)
+}
+
+function wrapChapterDocument(bodyHtml: string, css: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>${css}</style></head><body>${bodyHtml}</body></html>`
+}
+
+function escapeAttr(id: string): string {
+  return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id
 }
 
 export function PreviewScreen(props: {
@@ -40,8 +55,8 @@ export function PreviewScreen(props: {
     chapters.findIndex((ch) => ch.id === (props.startChapterId || props.book.readChapterId)),
   )
   const [index, setIndex] = useState(start < 0 ? 0 : start)
-  const [html, setHtml] = useState('')
-  const [warning, setWarning] = useState<string | undefined>()
+  const [bodies, setBodies] = useState<Record<string, string>>({})
+  const [warnings, setWarnings] = useState<Record<string, string | undefined>>({})
   const [chrome, setChrome] = useState(true)
   const [panel, setPanel] = useState<'toc' | 'search' | 'notes' | 'type' | null>(null)
   const [query, setQuery] = useState(props.highlight ?? '')
@@ -49,33 +64,93 @@ export function PreviewScreen(props: {
   const [notes, setNotes] = useState<Annotation[]>([])
   const [page, setPage] = useState(0)
   const [pages, setPages] = useState(1)
+  const [offset, setOffset] = useState(
+    chapters[start < 0 ? 0 : start]?.id === props.book.readChapterId ? (props.book.readOffset ?? 0) : 0,
+  )
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
   const [noteDraft, setNoteDraft] = useState('')
-  const scroller = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
+  const streamRef = useRef<HTMLDivElement>(null)
+  const heightMap = useRef(new Map<string, number>())
+  const windowFromRef = useRef(0)
+  const pendingJump = useRef<{ chapterId: string; offset: number } | null>(null)
+  const ignoreScroll = useRef(false)
+  const wasPaged = useRef(props.settings.readMode === 'page')
+  const indexRef = useRef(index)
+  const offsetRef = useRef(0)
   const chapter = chapters[index]
   const paged = props.settings.readMode === 'page'
+  indexRef.current = index
+  offsetRef.current = offset
+
+  const win = paged ? { from: index, to: index } : chapterWindow(index, chapters.length)
+  const windowChapters = chapters.slice(Math.max(0, win.from), Math.max(0, win.to + 1))
 
   const css = readerBodyCss(props.settings, chapter?.state === 'simplified')
+  const streamCss = readerBodyCss(props.settings, chapter?.state === 'simplified', '.preview-chapter')
+  const bodyHtml = (chapter && bodies[chapter.id]) || ''
+  const pageHtml = bodyHtml ? wrapChapterDocument(bodyHtml, css) : ''
+  const warning = chapter ? warnings[chapter.id] : undefined
 
   useEffect(() => {
-    setIndex(start < 0 ? 0 : start)
-  }, [props.book.id, start])
+    const id = props.startChapterId || props.book.readChapterId
+    const list = [...props.book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+    const found = list.findIndex((ch) => ch.id === id)
+    const next = found < 0 ? 0 : found
+    setIndex(next)
+    const target = list[next]
+    pendingJump.current = target
+      ? {
+          chapterId: target.id,
+          offset: target.id === props.book.readChapterId ? (props.book.readOffset ?? 0) : 0,
+        }
+      : null
+    windowFromRef.current = chapterWindow(next, list.length).from
+    setOffset(pendingJump.current?.offset ?? 0)
+  }, [props.book.id, props.startChapterId])
 
   useEffect(() => {
-    if (!chapter) return
+    if (props.book.id) {
+      heightMap.current = new Map()
+      setBodies({})
+      setWarnings({})
+    }
+  }, [props.book.id, query])
+
+  useEffect(() => {
+    const from = win.from
+    const to = win.to
+    if (to < from) return
     let cancelled = false
-    books.getChapterPreview(props.book.id, chapter).then((result) => {
+    const slice = chapters.slice(from, to + 1)
+    void Promise.all(
+      slice.map(async (ch, offsetInSlice) => {
+        const i = from + offsetInSlice
+        const result = await books.getChapterPreview(props.book.id, ch)
+        return {
+          id: ch.id,
+          body: chapterPreviewBody(result.html, exportChapterHeading(i, ch.title), query),
+          warning: result.warning,
+        }
+      }),
+    ).then((rows) => {
       if (cancelled) return
-      const heading = exportChapterHeading(index, chapter.title)
-      setHtml(wrapChapter(result.html, heading, css, query))
-      setWarning(result.warning)
-      setPage(0)
+      setBodies((prev) => {
+        const next = { ...prev }
+        for (const row of rows) next[row.id] = row.body
+        return next
+      })
+      setWarnings((prev) => {
+        const next = { ...prev }
+        for (const row of rows) next[row.id] = row.warning
+        return next
+      })
+      if (paged) setPage(0)
     })
     return () => {
       cancelled = true
     }
-  }, [chapter, css, index, props.book.id, query])
+  }, [chapters, paged, props.book.id, query, win.from, win.to])
 
   useEffect(() => {
     void books.listNotes(props.book.id).then(setNotes)
@@ -83,44 +158,146 @@ export function PreviewScreen(props: {
 
   useEffect(() => {
     const doc = frame.current?.contentDocument
-    const body = doc?.documentElement
-    if (!body || !chapter) return
-    const restore = () => {
-      if (!paged && chapter.id === props.book.readChapterId) {
-        const top = (props.book.readOffset ?? 0) * (body.scrollHeight - body.clientHeight)
-        body.scrollTop = top
-      }
-    }
-    restore()
-    const id = window.setTimeout(restore, 50)
-    return () => window.clearTimeout(id)
-  }, [html, chapter, paged, props.book.readChapterId, props.book.readOffset])
-
-  useEffect(() => {
-    const doc = frame.current?.contentDocument
     if (!doc?.documentElement || !paged) return
     const el = doc.documentElement
     const next = Math.max(1, Math.ceil(el.scrollHeight / Math.max(el.clientHeight, 1)))
     setPages(next)
-  }, [html, paged, props.settings])
+  }, [pageHtml, paged, props.settings])
 
-  const reportProgress = (offset: number) => {
-    if (!chapter) return
-    props.onProgress(chapter.id, offset)
+  const jumpTo = (nextIndex: number, nextOffset = 0) => {
+    if (nextIndex < 0 || nextIndex >= chapters.length) return
+    const target = chapters[nextIndex]!
+    pendingJump.current = { chapterId: target.id, offset: nextOffset }
+    setIndex(nextIndex)
+    setOffset(nextOffset)
+    setSel(null)
+    props.onProgress(target.id, nextOffset)
   }
 
-  const go = (next: number) => {
-    if (next < 0 || next >= chapters.length) return
-    setIndex(next)
-    setSel(null)
-    reportProgress(0)
+  const applyJump = (stream: HTMLElement) => {
+    const jump = pendingJump.current
+    if (!jump) return
+    const el = stream.querySelector(`[data-chapter-id="${escapeAttr(jump.chapterId)}"]`) as HTMLElement | null
+    if (!el || el.offsetHeight === 0) return
+    ignoreScroll.current = true
+    stream.scrollTop = scrollTopForOffset(stream.clientHeight, {
+      id: jump.chapterId,
+      top: el.offsetTop,
+      height: el.offsetHeight,
+    }, jump.offset)
+    pendingJump.current = null
+    window.requestAnimationFrame(() => {
+      ignoreScroll.current = false
+    })
+  }
+
+  useLayoutEffect(() => {
+    if (paged) {
+      wasPaged.current = true
+      return
+    }
+    const stream = streamRef.current
+    if (!stream) return
+    const { from } = chapterWindow(index, chapters.length)
+    if (wasPaged.current) {
+      wasPaged.current = false
+      windowFromRef.current = from
+      if (!pendingJump.current && chapter) {
+        pendingJump.current = { chapterId: chapter.id, offset: offsetRef.current }
+      }
+    } else if (from !== windowFromRef.current) {
+      ignoreScroll.current = true
+      stream.scrollTop += scrollDeltaForWindowShift(
+        windowFromRef.current,
+        from,
+        (i) => heightMap.current.get(chapters[i]?.id ?? '') ?? 0,
+      )
+      windowFromRef.current = from
+      window.requestAnimationFrame(() => {
+        ignoreScroll.current = false
+      })
+    }
+    applyJump(stream)
+  }, [bodies, chapter, chapters, index, paged, win.from])
+
+  useEffect(() => {
+    if (paged) return
+    const stream = streamRef.current
+    if (!stream) return
+    const nodes = [...stream.querySelectorAll<HTMLElement>('[data-chapter-id]')]
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const el = entry.target as HTMLElement
+        const id = el.getAttribute('data-chapter-id')
+        if (!id) continue
+        const nextH = el.offsetHeight
+        const prevH = heightMap.current.get(id) ?? 0
+        heightMap.current.set(id, nextH)
+        const currentId = chapters[indexRef.current]?.id
+        if (nextH !== prevH && el.offsetTop <= stream.scrollTop && id !== currentId) {
+          ignoreScroll.current = true
+          stream.scrollTop += nextH - prevH
+          window.requestAnimationFrame(() => {
+            ignoreScroll.current = false
+          })
+        }
+      }
+      if (pendingJump.current) applyJump(stream)
+    })
+    for (const node of nodes) ro.observe(node)
+    return () => ro.disconnect()
+  }, [bodies, paged, win.from, win.to])
+
+  const onStreamScroll = () => {
+    const stream = streamRef.current
+    if (!stream || ignoreScroll.current || paged) return
+    const boxes = readChapterBoxes(stream)
+    const id = chapterIdAtScroll(boxes, stream.scrollTop, stream.clientHeight, stream.scrollHeight)
+    const box = id ? boxes.find((item) => item.id === id) : boxes.find((item) => item.id === chapters[indexRef.current]?.id)
+    if (id) {
+      const next = chapters.findIndex((ch) => ch.id === id)
+      if (next >= 0 && next !== indexRef.current) setIndex(next)
+    }
+    if (box) {
+      const nextOffset = offsetInChapter(stream.scrollTop, stream.clientHeight, box)
+      setOffset(nextOffset)
+      props.onProgress(box.id, nextOffset)
+    }
+  }
+
+  const onStreamClick = (e: MouseEvent<HTMLDivElement>) => {
+    if (textSelecting(document)) return
+    if ((e.target as HTMLElement).closest('a')) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const w = rect.width
+    if (x < w * 0.22) jumpTo(index - 1)
+    else if (x > w * 0.78) jumpTo(index + 1)
+    else setChrome((v) => !v)
+  }
+
+  const emitStreamSel = () => {
+    const selection = document.getSelection()
+    const text = selection?.toString().trim() ?? ''
+    if (!text) {
+      setSel(null)
+      return
+    }
+    const node = selection?.anchorNode
+    if (node && streamRef.current && !streamRef.current.contains(node)) {
+      setSel(null)
+      return
+    }
+    const range = selection!.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    setSel({ text, x: rect.left, y: rect.bottom })
   }
 
   const onFrameLoad = () => {
-    const win = frame.current?.contentWindow
+    const winFrame = frame.current?.contentWindow
     const doc = frame.current?.contentDocument
-    if (!win || !doc) return
-    const loaded = Date.now()
+    if (!winFrame || !doc) return
     const emitSel = () => {
       const selection = doc.getSelection()
       const text = selection?.toString().trim() ?? ''
@@ -134,66 +311,51 @@ export function PreviewScreen(props: {
     }
     doc.addEventListener('mouseup', emitSel)
     doc.addEventListener('touchend', emitSel)
-    win.addEventListener('scroll', () => {
+    winFrame.addEventListener('scroll', () => {
       const el = doc.documentElement
       const max = el.scrollHeight - el.clientHeight
-      reportProgress(max <= 0 ? 1 : el.scrollTop / max)
-      if (!paged && max > 80 && el.scrollTop >= max - 4 && Date.now() - loaded > 600) {
-        if (index < chapters.length - 1) go(index + 1)
-      }
+      const nextOffset = max <= 0 ? 1 : el.scrollTop / max
+      setOffset(nextOffset)
+      if (chapter) props.onProgress(chapter.id, nextOffset)
     })
-    win.addEventListener('click', (e) => {
+    winFrame.addEventListener('click', (e) => {
       const x = e.clientX
-      const w = win.innerWidth
+      const w = winFrame.innerWidth
       if (textSelecting(doc)) return
-      if (paged) {
-        if (x < w * 0.28) turn(-1)
-        else if (x > w * 0.72) turn(1)
-        else setChrome((v) => !v)
-        return
-      }
-      if (x < w * 0.22) go(index - 1)
-      else if (x > w * 0.78) go(index + 1)
+      if (x < w * 0.28) turn(-1)
+      else if (x > w * 0.72) turn(1)
       else setChrome((v) => !v)
-    })
-    let startX = 0
-    win.addEventListener('touchstart', (e) => {
-      startX = e.changedTouches[0]?.clientX ?? 0
-    })
-    win.addEventListener('touchend', (e) => {
-      const dx = (e.changedTouches[0]?.clientX ?? 0) - startX
-      if (Math.abs(dx) < 60) return
-      if (paged) turn(dx < 0 ? 1 : -1)
-      else go(dx < 0 ? index + 1 : index - 1)
     })
   }
 
   const turn = (dir: -1 | 1) => {
     const doc = frame.current?.contentDocument?.documentElement
     if (!paged || !doc) {
-      go(index + dir)
+      jumpTo(index + dir)
       return
     }
     const next = page + dir
     if (next < 0) {
-      go(index - 1)
+      jumpTo(index - 1)
       return
     }
     if (next >= pages) {
-      go(index + 1)
+      jumpTo(index + 1)
       return
     }
     setPage(next)
     doc.scrollTop = next * doc.clientHeight
   }
 
-  const remaining = chapter ? readingMinutes(Math.round(countChars(textFromHtml(html)) * (1 - (props.book.readOffset ?? 0)))) : 0
-  const percent = readingPercent(index, chapters.length, props.book.readChapterId === chapter?.id ? props.book.readOffset ?? 0 : 0)
+  const remaining = chapter
+    ? readingMinutes(Math.round(countChars(textFromHtml(bodyHtml)) * (1 - offset)))
+    : 0
+  const percent = readingPercent(index, chapters.length, offset)
 
   if (!chapter) return <div className="empty">没有章节</div>
 
   return (
-    <div className="reader" ref={scroller}>
+    <div className="reader">
       {chrome ? (
         <div className="reader-chrome">
           <div className="reader-top">
@@ -227,16 +389,37 @@ export function PreviewScreen(props: {
 
       {warning ? <p className="muted preview-warning">{warning}</p> : null}
 
-      <div className={paged ? 'reader-page' : 'preview-frame-wrap'}>
-        <iframe
-          ref={frame}
-          className="preview-frame"
-          sandbox="allow-same-origin"
-          srcDoc={html}
-          title="阅读"
-          onLoad={onFrameLoad}
-        />
-      </div>
+      {paged ? (
+        <div className="reader-page">
+          <iframe
+            ref={frame}
+            className="preview-frame"
+            sandbox="allow-same-origin"
+            srcDoc={pageHtml}
+            title="阅读"
+            onLoad={onFrameLoad}
+          />
+        </div>
+      ) : (
+        <div
+          className="preview-stream"
+          ref={streamRef}
+          onScroll={onStreamScroll}
+          onClick={onStreamClick}
+          onMouseUp={emitStreamSel}
+          onTouchEnd={emitStreamSel}
+        >
+          <style>{streamCss}</style>
+          {windowChapters.map((ch) => (
+            <article
+              key={ch.id}
+              className="preview-chapter"
+              data-chapter-id={ch.id}
+              dangerouslySetInnerHTML={{ __html: bodies[ch.id] ?? '' }}
+            />
+          ))}
+        </div>
+      )}
 
       {chrome ? (
         <div className="reader-bottom">
@@ -259,7 +442,7 @@ export function PreviewScreen(props: {
       ) : null}
 
       {sel ? (
-        <div className="sel-pop" style={{ left: Math.max(12, sel.x), top: sel.y + 48 }}>
+        <div className="sel-pop" style={{ left: Math.max(12, sel.x), top: sel.y + (paged ? 48 : 8) }}>
           <button type="button" onClick={() => void addNote('highlight', sel.text)}>
             划线
           </button>
@@ -282,14 +465,14 @@ export function PreviewScreen(props: {
         <aside className="drawer">
           <h3>目录</h3>
           {chapters.map((ch, i) => {
-            const items = outlineFromXhtml(i === index ? html : '')
+            const items = outlineFromXhtml(i === index ? bodyHtml : '')
             return (
               <div key={ch.id}>
                 <button
                   className={i === index ? 'drawer-item is-on' : 'drawer-item'}
                   type="button"
                   onClick={() => {
-                    setIndex(i)
+                    jumpTo(i)
                     setPanel(null)
                   }}
                 >
@@ -328,7 +511,7 @@ export function PreviewScreen(props: {
               type="button"
               onClick={() => {
                 const next = chapters.findIndex((ch) => ch.id === hit.chapterId)
-                if (next >= 0) setIndex(next)
+                if (next >= 0) jumpTo(next)
                 setPanel(null)
               }}
             >
@@ -363,7 +546,7 @@ export function PreviewScreen(props: {
                   type="button"
                   onClick={() => {
                     const next = chapters.findIndex((ch) => ch.id === note.chapterId)
-                    if (next >= 0) setIndex(next)
+                    if (next >= 0) jumpTo(next)
                     setPanel(null)
                   }}
                 >
