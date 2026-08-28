@@ -3,7 +3,7 @@ export type ChapterBox = { id: string; top: number; height: number }
 export function chapterWindow(index: number, count: number): { from: number; to: number } {
   if (count <= 0) return { from: 0, to: -1 }
   const i = Math.min(Math.max(0, index), count - 1)
-  return { from: Math.max(0, i - 1), to: Math.min(count - 1, i + 1) }
+  return { from: Math.max(0, i - 1), to: Math.min(count - 1, i + 2) }
 }
 
 export function chapterIdAtScroll(
@@ -15,9 +15,10 @@ export function chapterIdAtScroll(
   if (boxes.length === 0) return undefined
   const maxScroll = Math.max(0, scrollHeight - viewportHeight)
   if (maxScroll <= 0) return undefined
-  if (scrollTop >= maxScroll - 2) return boxes[boxes.length - 1]!.id
-  let id = boxes[0]!.id
-  for (const box of boxes) {
+  const readable = boxes.filter((box) => box.height > 1)
+  const list = readable.length > 0 ? readable : boxes
+  let id = list[0]!.id
+  for (const box of list) {
     if (box.top <= scrollTop + 1) id = box.id
   }
   return id
@@ -47,6 +48,19 @@ export function scrollDeltaForWindowShift(
     for (let i = nextFrom; i < prevFrom; i++) delta += heightAtIndex(i)
   }
   return delta
+}
+
+export function canApplyChapterJump(input: {
+  targetHeight: number
+  previousHeight: number | null
+}): boolean {
+  if (input.targetHeight <= 0) return false
+  if (input.previousHeight != null && input.previousHeight <= 0) return false
+  return true
+}
+
+export function shouldShiftScrollForResize(resizedIsBeforeCurrent: boolean, heightDelta: number): boolean {
+  return resizedIsBeforeCurrent && heightDelta !== 0
 }
 
 export function readChapterBoxes(stream: HTMLElement): ChapterBox[] {

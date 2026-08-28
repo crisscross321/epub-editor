@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canApplyChapterJump,
   chapterIdAtScroll,
   chapterWindow,
   offsetInChapter,
   scrollDeltaForWindowShift,
   scrollTopForOffset,
+  shouldShiftScrollForResize,
 } from './stream'
 
 describe('chapterWindow', () => {
   it('keeps the previous and next chapter around the current one', () => {
-    expect(chapterWindow(0, 5)).toEqual({ from: 0, to: 1 })
-    expect(chapterWindow(2, 5)).toEqual({ from: 1, to: 3 })
+    expect(chapterWindow(0, 5)).toEqual({ from: 0, to: 2 })
+    expect(chapterWindow(2, 5)).toEqual({ from: 1, to: 4 })
     expect(chapterWindow(4, 5)).toEqual({ from: 3, to: 4 })
   })
 
@@ -37,8 +39,17 @@ describe('chapterIdAtScroll', () => {
     expect(chapterIdAtScroll(boxes, 400, 300, 1000)).toBe('b')
   })
 
-  it('advances to the last loaded chapter when the stream is scrolled to the end', () => {
-    expect(chapterIdAtScroll(boxes, 700, 300, 1000)).toBe('c')
+  it('does not treat a peeking next chapter as current just because the stream is at max scroll', () => {
+    expect(chapterIdAtScroll(boxes, 700, 300, 1000)).toBe('b')
+    expect(chapterIdAtScroll(boxes, 800, 300, 1000)).toBe('c')
+  })
+
+  it('stays on the current chapter when the next chapter is only a stub at the bottom', () => {
+    const stub = [
+      { id: 'a', top: 0, height: 4000 },
+      { id: 'b', top: 4000, height: 0 },
+    ]
+    expect(chapterIdAtScroll(stub, 3300, 700, 4000)).toBe('a')
   })
 })
 
@@ -66,5 +77,24 @@ describe('scrollDeltaForWindowShift', () => {
 
   it('adds newly prepended height when the window moves backward', () => {
     expect(scrollDeltaForWindowShift(2, 1, at)).toBe(240)
+  })
+})
+
+describe('canApplyChapterJump', () => {
+  it('waits until a previous chapter has height so the jump is not to the previous start', () => {
+    expect(canApplyChapterJump({ targetHeight: 800, previousHeight: 0 })).toBe(false)
+    expect(canApplyChapterJump({ targetHeight: 800, previousHeight: 1200 })).toBe(true)
+  })
+
+  it('jumps immediately when there is no previous chapter', () => {
+    expect(canApplyChapterJump({ targetHeight: 800, previousHeight: null })).toBe(true)
+  })
+})
+
+describe('shouldShiftScrollForResize', () => {
+  it('shifts scroll when a chapter above the current one changes height', () => {
+    expect(shouldShiftScrollForResize(true, 400)).toBe(true)
+    expect(shouldShiftScrollForResize(false, 400)).toBe(false)
+    expect(shouldShiftScrollForResize(true, 0)).toBe(false)
   })
 })

@@ -115,13 +115,20 @@ describe('PreviewScreen chapter navigation', () => {
     expect(heading(container)).not.toContain('第 2 章')
   })
 
+  it('opens chapter 2 from the chapter list as 第 2 章', async () => {
+    const container = render(screen({ startChapterId: 'ch2' }))
+    await flush()
+    expect(heading(container)).toContain('第 2 章 白塔')
+    expect(heading(container)).not.toContain('第 1 章')
+  })
+
   it('keeps the next chapter in the scroll stream', async () => {
     const container = render(screen())
     await flush()
     const stream = container.querySelector('.preview-stream')
     expect(stream?.querySelector('[data-chapter-id="ch1"]')).toBeTruthy()
     expect(stream?.querySelector('[data-chapter-id="ch2"]')).toBeTruthy()
-    expect(stream?.querySelector('[data-chapter-id="ch3"]')).toBeNull()
+    expect(stream?.querySelector('[data-chapter-id="ch3"]')).toBeTruthy()
   })
 
   it('switches chapters with 上一章 and 下一章 buttons', async () => {

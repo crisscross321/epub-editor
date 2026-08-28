@@ -9,12 +9,14 @@ import { outlineFromXhtml } from '../../epub/toc'
 import { highlightQuery } from '../../reader/highlight'
 import { readerBodyCss } from '../../reader/style'
 import {
+  canApplyChapterJump,
   chapterIdAtScroll,
   chapterWindow,
   offsetInChapter,
   readChapterBoxes,
   scrollDeltaForWindowShift,
   scrollTopForOffset,
+  shouldShiftScrollForResize,
 } from '../../reader/stream'
 import { fontSizePx, type AppSettings } from '../../storage/settings'
 import type { Annotation, BookRecord } from '../../types/book'
@@ -33,6 +35,14 @@ function wrapChapterDocument(bodyHtml: string, css: string): string {
 
 function escapeAttr(id: string): string {
   return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id
+}
+
+function previousChapterElement(el: HTMLElement): HTMLElement | null {
+  let prev = el.previousElementSibling as HTMLElement | null
+  while (prev && !prev.hasAttribute('data-chapter-id')) {
+    prev = prev.previousElementSibling as HTMLElement | null
+  }
+  return prev
 }
 
 export function PreviewScreen(props: {
@@ -74,14 +84,19 @@ export function PreviewScreen(props: {
   const heightMap = useRef(new Map<string, number>())
   const windowFromRef = useRef(0)
   const pendingJump = useRef<{ chapterId: string; offset: number } | null>(null)
+  const jumpTries = useRef(0)
   const ignoreScroll = useRef(false)
   const wasPaged = useRef(props.settings.readMode === 'page')
   const indexRef = useRef(index)
   const offsetRef = useRef(0)
+  const bookIdRef = useRef(props.book.id)
+  const queryRef = useRef(query)
   const chapter = chapters[index]
   const paged = props.settings.readMode === 'page'
   indexRef.current = index
   offsetRef.current = offset
+  bookIdRef.current = props.book.id
+  queryRef.current = query
 
   const win = paged ? { from: index, to: index } : chapterWindow(index, chapters.length)
   const windowChapters = chapters.slice(Math.max(0, win.from), Math.max(0, win.to + 1))
@@ -105,6 +120,7 @@ export function PreviewScreen(props: {
           offset: target.id === props.book.readChapterId ? (props.book.readOffset ?? 0) : 0,
         }
       : null
+    jumpTries.current = 0
     windowFromRef.current = chapterWindow(next, list.length).from
     setOffset(pendingJump.current?.offset ?? 0)
   }, [props.book.id, props.startChapterId])
@@ -121,20 +137,21 @@ export function PreviewScreen(props: {
     const from = win.from
     const to = win.to
     if (to < from) return
-    let cancelled = false
+    const bookId = props.book.id
+    const q = query
     const slice = chapters.slice(from, to + 1)
     void Promise.all(
       slice.map(async (ch, offsetInSlice) => {
         const i = from + offsetInSlice
-        const result = await books.getChapterPreview(props.book.id, ch)
+        const result = await books.getChapterPreview(bookId, ch)
         return {
           id: ch.id,
-          body: chapterPreviewBody(result.html, exportChapterHeading(i, ch.title), query),
+          body: chapterPreviewBody(result.html, exportChapterHeading(i, ch.title), q),
           warning: result.warning,
         }
       }),
     ).then((rows) => {
-      if (cancelled) return
+      if (bookId !== bookIdRef.current || q !== queryRef.current) return
       setBodies((prev) => {
         const next = { ...prev }
         for (const row of rows) next[row.id] = row.body
@@ -147,9 +164,6 @@ export function PreviewScreen(props: {
       })
       if (paged) setPage(0)
     })
-    return () => {
-      cancelled = true
-    }
   }, [chapters, paged, props.book.id, query, win.from, win.to])
 
   useEffect(() => {
@@ -168,6 +182,7 @@ export function PreviewScreen(props: {
     if (nextIndex < 0 || nextIndex >= chapters.length) return
     const target = chapters[nextIndex]!
     pendingJump.current = { chapterId: target.id, offset: nextOffset }
+    jumpTries.current = 0
     setIndex(nextIndex)
     setOffset(nextOffset)
     setSel(null)
@@ -178,14 +193,47 @@ export function PreviewScreen(props: {
     const jump = pendingJump.current
     if (!jump) return
     const el = stream.querySelector(`[data-chapter-id="${escapeAttr(jump.chapterId)}"]`) as HTMLElement | null
-    if (!el || el.offsetHeight === 0) return
+    if (!el) return
+    const prev = previousChapterElement(el)
+    if (
+      !canApplyChapterJump({
+        targetHeight: el.offsetHeight,
+        previousHeight: prev ? prev.offsetHeight : null,
+      })
+    ) {
+      return
+    }
+    const desired = scrollTopForOffset(
+      stream.clientHeight,
+      {
+        id: jump.chapterId,
+        top: el.offsetTop,
+        height: el.offsetHeight,
+      },
+      jump.offset,
+    )
     ignoreScroll.current = true
-    stream.scrollTop = scrollTopForOffset(stream.clientHeight, {
-      id: jump.chapterId,
-      top: el.offsetTop,
-      height: el.offsetHeight,
-    }, jump.offset)
-    pendingJump.current = null
+    stream.scrollTop = desired
+    const aligned = jump.offset === 0 ? Math.abs(el.offsetTop - stream.scrollTop) <= 8 : true
+    if (aligned) {
+      pendingJump.current = null
+      jumpTries.current = 0
+      for (const node of stream.querySelectorAll<HTMLElement>('[data-chapter-id]')) {
+        const id = node.getAttribute('data-chapter-id')
+        if (id) heightMap.current.set(id, node.offsetHeight)
+      }
+    } else {
+      jumpTries.current += 1
+      if (jumpTries.current > 30) {
+        pendingJump.current = null
+        jumpTries.current = 0
+      } else {
+        window.requestAnimationFrame(() => {
+          const next = streamRef.current
+          if (next) applyJump(next)
+        })
+      }
+    }
     window.requestAnimationFrame(() => {
       ignoreScroll.current = false
     })
@@ -232,10 +280,20 @@ export function PreviewScreen(props: {
         const id = el.getAttribute('data-chapter-id')
         if (!id) continue
         const nextH = el.offsetHeight
-        const prevH = heightMap.current.get(id) ?? 0
+        const prevH = heightMap.current.get(id)
         heightMap.current.set(id, nextH)
+        if (pendingJump.current || prevH == null || prevH === 0) {
+          if (pendingJump.current) applyJump(stream)
+          continue
+        }
         const currentId = chapters[indexRef.current]?.id
-        if (nextH !== prevH && el.offsetTop <= stream.scrollTop && id !== currentId) {
+        const currentEl = currentId
+          ? (stream.querySelector(`[data-chapter-id="${escapeAttr(currentId)}"]`) as HTMLElement | null)
+          : null
+        const resizedIsBeforeCurrent = Boolean(
+          currentEl && (el.compareDocumentPosition(currentEl) & Node.DOCUMENT_POSITION_FOLLOWING),
+        )
+        if (shouldShiftScrollForResize(resizedIsBeforeCurrent, nextH - prevH)) {
           ignoreScroll.current = true
           stream.scrollTop += nextH - prevH
           window.requestAnimationFrame(() => {

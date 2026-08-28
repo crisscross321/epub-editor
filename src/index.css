@@ -480,6 +480,17 @@ textarea,
   user-select: text;
 }
 
+.preview-chapter,
+.preview-chapter * {
+  max-width: 100%;
+}
+
+.preview-chapter *:not(img) {
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
 .preview-frame {
   position: absolute;
   inset: 0;
