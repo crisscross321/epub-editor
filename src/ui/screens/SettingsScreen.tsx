@@ -1,8 +1,16 @@
+import { formatBytes } from '../../storage/persist'
 import type { AppSettings } from '../../storage/settings'
 
 export function SettingsScreen(props: {
   settings: AppSettings
   onChange: (patch: Partial<AppSettings>) => void
+  persistStatus?: 'granted' | 'denied' | 'unsupported' | 'unknown'
+  trashCount?: number
+  trashBytes?: number
+  onEmptyTrash?: () => void
+  onBackup?: () => void
+  onRestore?: () => void
+  onExportAll?: () => void
 }) {
   return (
     <div className="screen">
@@ -91,6 +99,44 @@ export function SettingsScreen(props: {
             onChange={(e) => props.onChange({ backupDays: Number(e.target.value) || 3 })}
           />
         </label>
+        <div className="row" style={{ marginTop: 12 }}>
+          {props.onBackup ? (
+            <button className="btn" type="button" onClick={props.onBackup}>
+              导出书架备份
+            </button>
+          ) : null}
+          {props.onRestore ? (
+            <button className="btn btn-ghost" type="button" onClick={props.onRestore}>
+              恢复备份
+            </button>
+          ) : null}
+        </div>
+        {props.onExportAll ? (
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn btn-ghost" type="button" onClick={props.onExportAll}>
+              导出全部 EPUB
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="settings-block">
+        <h2 className="section-title">存储</h2>
+        <p className="muted">
+          {props.persistStatus === 'granted'
+            ? '系统已允许持久保存本机数据。'
+            : props.persistStatus === 'denied'
+              ? '系统未允许持久保存。请尽快导出，以免被清理。'
+              : '正在向系统申请持久保存。'}
+        </p>
+        <p>
+          回收站 {props.trashCount ?? 0} 本，约占 {formatBytes(props.trashBytes ?? 0)}。超过 7 天会自动清掉。
+        </p>
+        {props.onEmptyTrash ? (
+          <button className="btn btn-ghost" type="button" onClick={props.onEmptyTrash} disabled={!props.trashCount}>
+            清空回收站
+          </button>
+        ) : null}
       </section>
 
       <section className="settings-block">

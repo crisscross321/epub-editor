@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { BookRecord, TiptapDoc } from './types/book'
+import type { BookRecord, ChapterDump, TiptapDoc } from './types/book'
 import * as books from './app/bookService'
-import { editorBackRoute, previewBackTarget, type Route } from './app/nav'
+import { editorBackRoute, neighborChapterIds, previewBackTarget, type Route } from './app/nav'
 import { needsBackupReminder } from './app/progress'
 import { filterBooks, sortBooks } from './app/sortBooks'
-import { exportChapterHeading, splitDocByH1 } from './epub/headings'
+import { toArrayBuffer } from './epub/bytes'
+import { exportChapterHeading, wouldSplitByH1 } from './epub/headings'
 import { lossSummary } from './epub/loss'
 import { chaptersToMarkdown, chaptersToPlain } from './epub/plain'
-import { pickEpubFile, pickImageFile, pickTextFile, saveBytesToUser, saveEpubToUser } from './storage/files'
+import {
+  pickBackupFile,
+  pickEpubFile,
+  pickImageFile,
+  pickTextFile,
+  readBytesFromAppUrl,
+  saveBytesToUser,
+  saveEpubToUser,
+  writeBytesToLibrary,
+} from './storage/files'
+import { requestPersistentStorage } from './storage/persist'
 import {
   applyTheme,
   loadSettings,
@@ -39,7 +50,13 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [undo, setUndo] = useState<{ ids: string[]; title: string } | null>(null)
+  const [undo, setUndo] = useState<
+    | { kind: 'books'; ids: string[]; title: string }
+    | { kind: 'chapter'; dump: ChapterDump; title: string }
+    | null
+  >(null)
+  const [persistStatus, setPersistStatus] = useState<'granted' | 'denied' | 'unsupported' | 'unknown'>('unknown')
+  const [trashMeta, setTrashMeta] = useState({ count: 0, bytes: 0 })
   const [confirm, setConfirm] = useState<null | {
     title: string
     body: ReactNode
@@ -52,7 +69,6 @@ export default function App() {
   const [pendingImage, setPendingImage] = useState<{ src: string; imageId: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
   const progressTimer = useRef<number | null>(null)
-  const splitting = useRef(false)
   const undoTimer = useRef<number | null>(null)
 
   const patchSettings = (patch: Partial<AppSettings>) => setSettings(saveSettings(patch))
@@ -76,9 +92,14 @@ export default function App() {
     return next
   }, [])
 
+  const loadTrashMeta = useCallback(async () => {
+    setTrashMeta(await books.trashSummary())
+  }, [])
+
   useEffect(() => {
     void refreshShelf()
-  }, [refreshShelf])
+    void loadTrashMeta()
+  }, [refreshShelf, loadTrashMeta])
 
   useEffect(() => bindKeyboardReveal(), [])
 
@@ -110,6 +131,8 @@ export default function App() {
   confirmRef.current = confirm
 
   const goShelf = async () => {
+    const current = bookRef.current
+    if (current) books.releaseBookImages(current.id)
     setRoute({ name: 'shelf' })
     setBook(null)
     setDoc(null)
@@ -117,7 +140,7 @@ export default function App() {
     await refreshShelf()
   }
 
-  const leaveEditor = (to: Route) => {
+  const leaveEditor = (to: Route, splitOnH1 = false) => {
     const current = routeRef.current
     if (current.name !== 'editor') return
     if (saveTimer.current) {
@@ -129,12 +152,36 @@ export default function App() {
     setRoute(to)
     if (currentDoc) {
       void books
-        .saveDoc(current.bookId, current.chapterId, currentDoc)
+        .saveDoc(current.bookId, current.chapterId, currentDoc, { splitOnH1 })
         .then((result) => setBook(result.book))
         .catch(fail)
       return
     }
     void loadBook(current.bookId)
+  }
+
+  const flushEditor = (splitOnH1 = false) => {
+    const current = routeRef.current
+    const currentDoc = docRef.current
+    if (current.name !== 'editor' || !currentDoc) return Promise.resolve()
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    return books
+      .saveDoc(current.bookId, current.chapterId, currentDoc, { splitOnH1 })
+      .then((result) => {
+        setBook(result.book)
+        if (result.focusChapterId !== current.chapterId) {
+          setDoc(result.focusDoc)
+          setRoute({ name: 'editor', bookId: current.bookId, chapterId: result.focusChapterId, from: current.from })
+        }
+        return result
+      })
+      .catch((err) => {
+        fail(err)
+        return undefined
+      })
   }
 
   const goBack = () => {
@@ -145,13 +192,31 @@ export default function App() {
     const current = routeRef.current
     if (current.name === 'editor') {
       const next = editorBackRoute(current)
+      const currentDoc = docRef.current
+      if (currentDoc && wouldSplitByH1(currentDoc)) {
+        setConfirm({
+          title: '要把一级标题拆成新章节吗？',
+          body: '正文里出现了多个一级标题。拆章后可以继续写新的一章；也可以保持在这一章里。',
+          confirm: '拆成新章',
+          extra: '保持一章',
+          onExtra: () => {
+            setConfirm(null)
+            leaveEditor(next, false)
+          },
+          action: () => {
+            setConfirm(null)
+            leaveEditor(next, true)
+          },
+        })
+        return
+      }
       setConfirm({
         title: '离开编辑？',
         body: '确定返回？修改会自动保存。',
         confirm: '离开',
         action: () => {
           setConfirm(null)
-          leaveEditor(next)
+          leaveEditor(next, false)
         },
       })
       return
@@ -186,6 +251,86 @@ export default function App() {
       .catch(() => undefined)
   }
   goBackRef.current = goBack
+  const flushEditorRef = useRef(flushEditor)
+  flushEditorRef.current = flushEditor
+
+  useEffect(() => {
+    let cancelled = false
+    void requestPersistentStorage().then((status) => {
+      if (cancelled) return
+      setPersistStatus(status)
+      if (status === 'denied') {
+        setNotice({ kind: 'err', text: '系统未允许持久保存。请尽快把书导出到手机目录，以免被清理。' })
+      }
+    })
+    void books.purgeExpiredTrash().then((count) => {
+      if (count) void loadTrashMeta()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [loadTrashMeta])
+
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') void flushEditorRef.current()
+    }
+    const onPageHide = () => {
+      void flushEditorRef.current()
+    }
+    document.addEventListener('visibilitychange', onHidden)
+    window.addEventListener('pagehide', onPageHide)
+    let handle: { remove: () => Promise<void> } | undefined
+    void import('@capacitor/app')
+      .then(({ App }) => App.addListener('appStateChange', (state) => {
+        if (!state.isActive) void flushEditorRef.current()
+      }))
+      .then((next) => {
+        handle = next
+      })
+      .catch(() => undefined)
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden)
+      window.removeEventListener('pagehide', onPageHide)
+      void handle?.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const openIncoming = async (url: string) => {
+      if (!/epub/i.test(url)) return
+      try {
+        setBusy(true)
+        const { bytes, name } = await readBytesFromAppUrl(url)
+        const imported = await books.importEpub(toArrayBuffer(bytes), name)
+        if (cancelled) return
+        setBook(imported)
+        setCover(await books.coverUrl(imported.id))
+        setRoute({ name: 'chapters', bookId: imported.id })
+        await refreshShelf()
+      } catch (err) {
+        fail(err)
+      } finally {
+        setBusy(false)
+      }
+    }
+    let handle: { remove: () => Promise<void> } | undefined
+    void import('@capacitor/app')
+      .then(async ({ App }) => {
+        if (cancelled) return
+        const launch = await App.getLaunchUrl()
+        if (launch?.url) void openIncoming(launch.url)
+        handle = await App.addListener('appUrlOpen', (event) => {
+          void openIncoming(event.url)
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      void handle?.remove()
+    }
+  }, [refreshShelf])
 
   useEffect(() => {
     let cancelled = false
@@ -312,29 +457,19 @@ export default function App() {
   }
 
   const onDocChange = (next: TiptapDoc) => {
-    if (route.name !== 'editor' || !book || splitting.current) return
+    if (route.name !== 'editor' || !book) return
     const chapterId = route.chapterId
     const bookId = book.id
-    const currentTitle = book.chapters.find((ch) => ch.id === chapterId)?.title || ''
     setDoc(next)
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    const willSplit = splitDocByH1(next, currentTitle).length > 1
-    if (willSplit) splitting.current = true
     saveTimer.current = window.setTimeout(() => {
       void books
-        .saveDoc(bookId, chapterId, next)
+        .saveDoc(bookId, chapterId, next, { splitOnH1: false })
         .then((result) => {
           setBook(result.book)
-          if (result.focusChapterId !== chapterId) {
-            setDoc(result.focusDoc)
-            setRoute({ name: 'editor', bookId, chapterId: result.focusChapterId, from: route.from })
-          }
         })
         .catch(fail)
-        .finally(() => {
-          splitting.current = false
-        })
-    }, willSplit ? 0 : 800)
+    }, 400)
   }
 
   const onInsertImage = async () => {
@@ -445,6 +580,8 @@ export default function App() {
     route.name === 'editor' && book
       ? [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).findIndex((c) => c.id === route.chapterId)
       : -1
+  const neighbors =
+    route.name === 'editor' && book ? neighborChapterIds(book.chapters, route.chapterId) : {}
   const title =
     route.name === 'chapters'
       ? book?.title || '未命名'
@@ -483,6 +620,24 @@ export default function App() {
         </div>
       ) : null}
       {busy ? <div className="muted" style={{ padding: '8px 18px' }}>处理中…</div> : null}
+      {undo?.kind === 'chapter' && route.name === 'chapters' ? (
+        <div className="banner banner-ok" role="status">
+          已删除「{undo.title}」
+          <button
+            type="button"
+            onClick={() => {
+              if (undoTimer.current) window.clearTimeout(undoTimer.current)
+              void books
+                .restoreChapter(undo.dump)
+                .then(setBook)
+                .then(() => setUndo(null))
+                .catch(fail)
+            }}
+          >
+            撤销
+          </button>
+        </div>
+      ) : null}
 
       {!settings.onboardingDone ? <Onboarding onDone={() => patchSettings({ onboardingDone: true })} /> : null}
 
@@ -495,7 +650,7 @@ export default function App() {
           query={query}
           continueBook={continueBook?.lastReadAt ? continueBook : undefined}
           backupCount={backupCount}
-          undoLabel={undo?.title}
+          undoLabel={undo?.kind === 'books' ? undo.title : undefined}
           onQuery={setQuery}
           onSort={(shelfSort) => patchSettings({ shelfSort })}
           onView={(shelfView) => patchSettings({ shelfView })}
@@ -533,6 +688,7 @@ export default function App() {
                 void Promise.all(ids.map((id) => books.trashBook(id)))
                   .then(() => {
                     setUndo({
+                      kind: 'books',
                       ids,
                       title:
                         ids.length > 1
@@ -541,17 +697,17 @@ export default function App() {
                     })
                     if (undoTimer.current) window.clearTimeout(undoTimer.current)
                     undoTimer.current = window.setTimeout(() => {
-                      void Promise.all(ids.map((id) => books.purgeTrash(id)))
+                      void Promise.all(ids.map((id) => books.purgeTrash(id))).then(() => void loadTrashMeta())
                       setUndo(null)
                     }, 10_000)
-                    return refreshShelf()
+                    return Promise.all([refreshShelf(), loadTrashMeta()])
                   })
                   .catch(fail)
               },
             })
           }
           onUndo={() => {
-            if (!undo) return
+            if (!undo || undo.kind !== 'books') return
             if (undoTimer.current) window.clearTimeout(undoTimer.current)
             void Promise.all(undo.ids.map((id) => books.restoreBook(id)))
               .then(refreshShelf)
@@ -588,12 +744,22 @@ export default function App() {
           onDelete={(id) =>
             setConfirm({
               title: '删除这一章？',
-              body: '删除后导出时不会再包含这一章。',
+              body: '删除后导出时不会再包含这一章。10 秒内可以撤销。',
               confirm: '删除',
               danger: true,
               action: () => {
                 setConfirm(null)
-                void books.deleteChapter(book.id, id).then(setBook).catch(fail)
+                void books
+                  .snapshotChapter(book.id, id)
+                  .then(async (dump) => {
+                    const next = await books.deleteChapter(book.id, id)
+                    setBook(next)
+                    if (!dump) return
+                    setUndo({ kind: 'chapter', dump, title: dump.chapter.title || '未命名' })
+                    if (undoTimer.current) window.clearTimeout(undoTimer.current)
+                    undoTimer.current = window.setTimeout(() => setUndo(null), 10_000)
+                  })
+                  .catch(fail)
               },
             })
           }
@@ -667,7 +833,78 @@ export default function App() {
         />
       ) : null}
 
-      {route.name === 'settings' ? <SettingsScreen settings={settings} onChange={patchSettings} /> : null}
+      {route.name === 'settings' ? (
+        <SettingsScreen
+          settings={settings}
+          onChange={patchSettings}
+          persistStatus={persistStatus}
+          trashCount={trashMeta.count}
+          trashBytes={trashMeta.bytes}
+          onEmptyTrash={() =>
+            setConfirm({
+              title: '清空回收站？',
+              body: '回收站里的书会永久删掉，无法再撤销。',
+              confirm: '清空',
+              danger: true,
+              action: () => {
+                setConfirm(null)
+                void books.emptyTrash().then(loadTrashMeta).catch(fail)
+              },
+            })
+          }
+          onBackup={() => {
+            void (async () => {
+              try {
+                setBusy(true)
+                const bytes = await books.exportShelfBackup()
+                const stamp = new Date().toISOString().slice(0, 10)
+                const message = await saveBytesToUser(`素笺书架-${stamp}`, bytes, 'application/zip', 'zip')
+                setNotice({ kind: 'ok', text: message })
+              } catch (err) {
+                fail(err)
+              } finally {
+                setBusy(false)
+              }
+            })()
+          }}
+          onRestore={() => {
+            void (async () => {
+              const file = await pickBackupFile()
+              if (!file) return
+              try {
+                setBusy(true)
+                const result = await books.importShelfBackup(new Uint8Array(await file.arrayBuffer()))
+                await refreshShelf()
+                const extra = result.renamed ? `（${result.renamed} 本因编号重复换了新编号）` : ''
+                setNotice({ kind: 'ok', text: `已恢复 ${result.imported} 本${extra}` })
+              } catch (err) {
+                fail(err)
+              } finally {
+                setBusy(false)
+              }
+            })()
+          }}
+          onExportAll={() => {
+            void (async () => {
+              try {
+                setBusy(true)
+                const all = await books.listBooks()
+                for (const item of all) {
+                  const bytes = await books.exportEpub(item.id)
+                  await writeBytesToLibrary(item.title || '未命名', bytes, 'epub')
+                  await books.markExported(item.id)
+                }
+                await refreshShelf()
+                setNotice({ kind: 'ok', text: `已把 ${all.length} 本 EPUB 写到「文档/素笺」。` })
+              } catch (err) {
+                fail(err)
+              } finally {
+                setBusy(false)
+              }
+            })()
+          }}
+        />
+      ) : null}
 
       {route.name === 'editor' && doc ? (
         <ErrorBoundary>
@@ -678,7 +915,45 @@ export default function App() {
             onImageConsumed={() => setPendingImage(null)}
             onChange={onDocChange}
             onInsertImage={() => void onInsertImage()}
-            onPreview={() => leaveEditor({ name: 'preview', bookId: route.bookId, chapterId: route.chapterId, from: 'editor' })}
+            onPreview={() =>
+              leaveEditor({ name: 'preview', bookId: route.bookId, chapterId: route.chapterId, from: 'editor' }, false)
+            }
+            onSplit={() => {
+              const currentDoc = docRef.current
+              if (!currentDoc || !wouldSplitByH1(currentDoc)) {
+                setNotice({ kind: 'err', text: '这一章里没有第二个一级标题。把要拆出去的段落设成 H1 再点拆章。' })
+                return
+              }
+              setConfirm({
+                title: '按一级标题拆章？',
+                body: '每个一级标题会变成新的一章，并跳到新拆出的那一章。',
+                confirm: '拆章',
+                action: () => {
+                  setConfirm(null)
+                  void flushEditor(true)
+                },
+              })
+            }}
+            onPrevChapter={() => {
+              const id = neighbors.prevId
+              if (!id) return
+              void flushEditor(false).then((result) => {
+                if (!result) return
+                books.releaseBookImages(route.bookId)
+                void openChapter(id, route.from ?? 'chapters')
+              })
+            }}
+            onNextChapter={() => {
+              const id = neighbors.nextId
+              if (!id) return
+              void flushEditor(false).then((result) => {
+                if (!result) return
+                books.releaseBookImages(route.bookId)
+                void openChapter(id, route.from ?? 'chapters')
+              })
+            }}
+            hasPrevChapter={Boolean(neighbors.prevId)}
+            hasNextChapter={Boolean(neighbors.nextId)}
             onReplaceBook={(search, replacement) => {
               void books.replaceAllInBook(route.bookId, search, replacement).then((result) => {
                 setNotice({

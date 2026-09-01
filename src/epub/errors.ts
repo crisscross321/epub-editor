@@ -23,8 +23,11 @@ export class EpubError extends Error {
   }
 }
 
+import { isQuotaExceeded } from '../storage/persist'
+
 export function messageForUnknown(error: unknown): string {
   if (error instanceof EpubError) return error.message
+  if (isQuotaExceeded(error)) return '存储空间不足。请先导出或删除不用的书，再试一次。'
   if (error instanceof Error && error.message) return error.message
   return '出了点问题，请重试'
 }

@@ -6,6 +6,7 @@ import { docToXhtml } from '../../epub/serialize'
 import { replaceAllInDoc } from '../../epub/replace'
 import { applyImageLayout, readImageLayout, type ImageAlign } from '../../images/layout'
 import type { TiptapDoc } from '../../types/book'
+import { htmlFromPaste } from '../../editor/paste'
 import { countChars, textFromDoc } from '../../content/text'
 import { outlineFromDoc } from '../../editor/outline'
 import { markBlankBlocks } from '../blankLines'
@@ -40,12 +41,20 @@ export function SimpleEditor(props: {
   onInsertImage: () => void
   onPreview?: () => void
   onReplaceBook?: (search: string, replacement: string) => void
+  onSplit?: () => void
+  onPrevChapter?: () => void
+  onNextChapter?: () => void
+  hasPrevChapter?: boolean
+  hasNextChapter?: boolean
 }) {
   const surface = useRef<HTMLDivElement>(null)
+  const parsedDoc = useRef<TiptapDoc>(props.doc)
+  const wordTimer = useRef<number | null>(null)
   const [showFind, setShowFind] = useState(false)
   const [showOutline, setShowOutline] = useState(false)
   const [picked, setPicked] = useState<HTMLImageElement | null>(null)
   const [, setTick] = useState(0)
+  const [wordCount, setWordCount] = useState(() => countChars(textFromDoc(props.doc)))
 
   useEffect(() => {
     const el = surface.current
@@ -80,6 +89,13 @@ export function SimpleEditor(props: {
   }, [props.pendingImage])
 
   useEffect(() => {
+    parsedDoc.current = props.doc
+    setWordCount(countChars(textFromDoc(props.doc)))
+    // chapter switch only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.docKey])
+
+  useEffect(() => {
     if (!picked) return
     const sync = () => setTick((n) => n + 1)
     window.addEventListener('scroll', sync, true)
@@ -94,7 +110,13 @@ export function SimpleEditor(props: {
     const el = surface.current
     if (el) markBlankBlocks(el)
     const html = el?.innerHTML || '<p></p>'
-    props.onChange(simplifyXhtml(`<div>${html}</div>`, (src) => src))
+    const next = simplifyXhtml(`<div>${html}</div>`, (src) => src)
+    parsedDoc.current = next
+    props.onChange(next)
+    if (wordTimer.current) window.clearTimeout(wordTimer.current)
+    wordTimer.current = window.setTimeout(() => {
+      setWordCount(countChars(textFromDoc(parsedDoc.current)))
+    }, 400)
   }
 
   const markPicked = (img: HTMLImageElement | null) => {
@@ -169,7 +191,8 @@ export function SimpleEditor(props: {
         showOutline={showOutline}
         onToggleOutline={() => setShowOutline((v) => !v)}
         onPreview={props.onPreview}
-        wordCount={countChars(textFromDoc(currentDoc()))}
+        onSplit={props.onSplit}
+        wordCount={wordCount}
       >
         {showOutline ? (
           <div className="outline-pop">
@@ -232,6 +255,12 @@ export function SimpleEditor(props: {
         suppressContentEditableWarning
         spellCheck={false}
         onInput={emitChange}
+        onPaste={(e) => {
+          e.preventDefault()
+          const html = htmlFromPaste(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'))
+          if (html) run('insertHTML', html)
+          emitChange()
+        }}
         onKeyUp={() => setTick((n) => n + 1)}
         onMouseUp={() => setTick((n) => n + 1)}
         onClick={(e) => {
@@ -249,6 +278,26 @@ export function SimpleEditor(props: {
           onDelete={deletePicked}
           style={imageFloatStyle(picked.getBoundingClientRect())}
         />
+      ) : null}
+      {props.onPrevChapter || props.onNextChapter ? (
+        <div className="chapter-nav">
+          <button
+            className="btn btn-ghost"
+            type="button"
+            disabled={!props.hasPrevChapter}
+            onClick={props.onPrevChapter}
+          >
+            上一章
+          </button>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            disabled={!props.hasNextChapter}
+            onClick={props.onNextChapter}
+          >
+            下一章
+          </button>
+        </div>
       ) : null}
     </>
   )

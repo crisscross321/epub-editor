@@ -79,6 +79,27 @@ describe('EditorScreen', () => {
     expect(spy).toHaveBeenCalled()
   })
 
+  it('shows chapter navigation and split when those actions are provided', () => {
+    const container = render(
+      <EditorScreen
+        docKey="ch1"
+        doc={doc}
+        pendingImage={null}
+        onImageConsumed={() => {}}
+        onChange={() => {}}
+        onInsertImage={() => {}}
+        onSplit={() => {}}
+        onPrevChapter={() => {}}
+        onNextChapter={() => {}}
+        hasPrevChapter
+        hasNextChapter
+      />,
+    )
+    expect(button(container, '拆章')).toBeTruthy()
+    expect(button(container, '上一章')).toBeTruthy()
+    expect(button(container, '下一章')).toBeTruthy()
+  })
+
   it('does not depend on @tiptap packages', () => {
     const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../../package.json'), 'utf8')) as {
       dependencies?: Record<string, string>

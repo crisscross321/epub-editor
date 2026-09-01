@@ -7,6 +7,18 @@ export interface CompressedImage {
   ext: string
 }
 
+export function shouldKeepOriginal(input: {
+  byteLength: number
+  width: number
+  height: number
+  maxBytes?: number
+  maxSide?: number
+}): boolean {
+  const maxBytes = input.maxBytes ?? MAX_BYTES
+  const maxSide = input.maxSide ?? MAX_SIDE
+  return input.byteLength <= maxBytes && Math.max(input.width, input.height) <= maxSide
+}
+
 function mimeToExt(mime: string): string {
   if (mime.includes('png')) return 'png'
   if (mime.includes('webp')) return 'webp'
@@ -31,6 +43,11 @@ export async function compressImage(blob: Blob): Promise<CompressedImage> {
       return { bytes: original, mime: sourceMime, ext: mimeToExt(sourceMime) }
     }
     throw new Error('无法读取这张图片')
+  }
+
+  if (shouldKeepOriginal({ byteLength: original.byteLength, width: bitmap.width, height: bitmap.height })) {
+    bitmap.close()
+    return { bytes: original, mime: sourceMime, ext: mimeToExt(sourceMime) }
   }
 
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height))

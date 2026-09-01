@@ -16,6 +16,7 @@ export function EditorToolbar(props: {
   showOutline?: boolean
   onToggleOutline?: () => void
   onPreview?: () => void
+  onSplit?: () => void
   wordCount?: number
   children?: ReactNode
 }) {
@@ -87,6 +88,11 @@ export function EditorToolbar(props: {
         {props.onToggleOutline ? (
           <button type="button" className={props.showOutline ? 'is-on' : ''} onClick={props.onToggleOutline}>
             大纲
+          </button>
+        ) : null}
+        {props.onSplit ? (
+          <button type="button" onClick={props.onSplit}>
+            拆章
           </button>
         ) : null}
         {props.onPreview ? (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { editorBackRoute, previewBackTarget } from './nav'
+import { editorBackRoute, neighborChapterIds, previewBackTarget } from './nav'
 
 describe('reading/editor back', () => {
   it('does not loop back to editor after returning from edit to reading', () => {
@@ -33,5 +33,16 @@ describe('reading/editor back', () => {
     expect(
       previewBackTarget({ name: 'preview', bookId: 'b1', chapterId: 'c1', from: 'chapters' }),
     ).toBe('chapters')
+  })
+
+  it('names the previous and next chapter in spine order', () => {
+    const chapters = [
+      { id: 'a', spineIndex: 2 },
+      { id: 'b', spineIndex: 0 },
+      { id: 'c', spineIndex: 1 },
+    ]
+    expect(neighborChapterIds(chapters, 'c')).toEqual({ prevId: 'b', nextId: 'a' })
+    expect(neighborChapterIds(chapters, 'b')).toEqual({ nextId: 'c' })
+    expect(neighborChapterIds(chapters, 'missing')).toEqual({})
   })
 })

@@ -140,6 +140,10 @@ export async function listAnnotations(bookId: string): Promise<Annotation[]> {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
+export async function listAllAnnotations(): Promise<Annotation[]> {
+  return (await db()).getAll('annotations')
+}
+
 export async function deleteAnnotation(id: string): Promise<void> {
   await (await db()).delete('annotations', id)
 }
@@ -163,6 +167,10 @@ export async function getTrash(id: string): Promise<TrashDump | undefined> {
 
 export async function deleteTrash(id: string): Promise<void> {
   await (await db()).delete('trash', id)
+}
+
+export async function listTrash(): Promise<TrashDump[]> {
+  return (await db()).getAll('trash')
 }
 
 export async function restoreDump(dump: TrashDump): Promise<void> {

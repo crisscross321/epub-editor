@@ -1,4 +1,4 @@
-import type { BookRecord, ChapterIndex, TiptapDoc, TiptapNode } from '../types/book'
+import type { BookRecord, ChapterDump, ChapterIndex, TiptapDoc, TiptapNode } from '../types/book'
 import { findHits, textFromDoc, textFromHtml } from '../content/text'
 import { splitImportedText } from '../editor/importText'
 import { toArrayBuffer, bytesToDataUrl } from '../epub/bytes'
@@ -8,6 +8,7 @@ import { parseEpub } from '../epub/parse'
 import { dirname, extname, joinPath } from '../epub/paths'
 import { docToXhtml, imageHrefFor, packEpub, rewriteImageSrcs } from '../epub/serialize'
 import {
+  displayChapterName,
   ensureLeadingH1,
   exportChapterHeading,
   splitDocByH1,
@@ -18,6 +19,12 @@ import { replaceAllInDoc } from '../epub/replace'
 import { emptyDoc, simplifyXhtml } from '../epub/simplify'
 import { inlineRelativeImages } from '../epub/previewImages'
 import { compressImage } from '../images/compress'
+import { packBackup, unpackBackup } from './backup'
+import { rememberBlobUrl, revokeBlobUrl, revokeBookImages } from '../storage/blobUrls'
+import { assertRoomFor } from '../storage/persist'
+import { enqueueByKey } from '../storage/saveQueue'
+import { loadSettings } from '../storage/settings'
+import { dumpSizeBytes, isTrashExpired } from '../storage/trash'
 import * as db from '../storage/idb'
 
 function now(): string {
@@ -92,6 +99,7 @@ export async function createBook(): Promise<BookRecord> {
 }
 
 export async function importEpub(buf: ArrayBuffer, sourceName: string): Promise<BookRecord> {
+  await assertRoomFor(buf.byteLength)
   const parsed = await parseEpub(buf)
   const id = newId()
   const book: BookRecord = {
@@ -143,45 +151,56 @@ export async function saveDoc(
   bookId: string,
   chapterId: string,
   doc: TiptapDoc,
+  options?: { splitOnH1?: boolean },
 ): Promise<{ book: BookRecord; focusChapterId: string; focusDoc: TiptapDoc }> {
-  const book = await getBook(bookId)
-  const chapter = book.chapters.find((ch) => ch.id === chapterId)
-  if (!chapter) throw new Error('找不到这一章')
-  const slices = splitDocByH1(doc, chapter.title)
-  const first = slices[0]!
-  await db.putDoc(bookId, chapterId, first.doc)
-
-  const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
-  const afterIndex = sorted.findIndex((ch) => ch.id === chapterId)
-  const created: ChapterIndex[] = []
-  for (let i = 1; i < slices.length; i += 1) {
-    const slice = slices[i]!
-    const id = `ch-${newId().slice(0, 8)}`
-    const next: ChapterIndex = {
-      id,
-      href: `OEBPS/text/${id}.xhtml`,
-      title: slice.title,
-      spineIndex: afterIndex + i,
-      state: 'simplified',
+  return enqueueByKey(`${bookId}::${chapterId}`, async () => {
+    const book = await getBook(bookId)
+    const chapter = book.chapters.find((ch) => ch.id === chapterId)
+    if (!chapter) throw new Error('找不到这一章')
+    const slices = splitDocByH1(doc, chapter.title)
+    const title = slices[0]?.title ?? displayChapterName(chapter.title)
+    if (!options?.splitOnH1 || slices.length <= 1) {
+      await db.putDoc(bookId, chapterId, doc)
+      const chapters = book.chapters.map((ch) => (ch.id === chapterId ? { ...ch, title } : ch))
+      const nextBook = await saveBook({ ...book, chapters })
+      return { book: nextBook, focusChapterId: chapterId, focusDoc: doc }
     }
-    await db.putDoc(bookId, id, slice.doc)
-    created.push(next)
-  }
 
-  const renamed = sorted.map((ch) => (ch.id === chapterId ? { ...ch, title: first.title } : ch))
-  const chapters = created.length
-    ? [...renamed.slice(0, afterIndex + 1), ...created, ...renamed.slice(afterIndex + 1)].map(
-        (ch, spineIndex) => ({ ...ch, spineIndex }),
-      )
-    : renamed
+    const first = slices[0]!
+    await db.putDoc(bookId, chapterId, first.doc)
 
-  const nextBook = await saveBook({ ...book, chapters })
-  const jumped = created[0]
-  return {
-    book: nextBook,
-    focusChapterId: jumped?.id ?? chapterId,
-    focusDoc: jumped ? slices[1]!.doc : first.doc,
-  }
+    const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+    const afterIndex = sorted.findIndex((ch) => ch.id === chapterId)
+    const created: ChapterIndex[] = []
+    for (let i = 1; i < slices.length; i += 1) {
+      const slice = slices[i]!
+      const id = `ch-${newId().slice(0, 8)}`
+      const next: ChapterIndex = {
+        id,
+        href: `OEBPS/text/${id}.xhtml`,
+        title: slice.title,
+        spineIndex: afterIndex + i,
+        state: 'simplified',
+      }
+      await db.putDoc(bookId, id, slice.doc)
+      created.push(next)
+    }
+
+    const renamed = sorted.map((ch) => (ch.id === chapterId ? { ...ch, title: first.title } : ch))
+    const chapters = created.length
+      ? [...renamed.slice(0, afterIndex + 1), ...created, ...renamed.slice(afterIndex + 1)].map(
+          (ch, spineIndex) => ({ ...ch, spineIndex }),
+        )
+      : renamed
+
+    const nextBook = await saveBook({ ...book, chapters })
+    const jumped = created[0]
+    return {
+      book: nextBook,
+      focusChapterId: jumped?.id ?? chapterId,
+      focusDoc: jumped ? slices[1]!.doc : first.doc,
+    }
+  })
 }
 
 export async function openChapterForEdit(bookId: string, chapterId: string): Promise<TiptapDoc> {
@@ -235,17 +254,24 @@ async function materializeImages(bookId: string, doc: TiptapDoc): Promise<void> 
 }
 
 export async function insertImage(bookId: string, file: Blob): Promise<{ imageId: string; src: string }> {
+  await assertRoomFor(file.size)
   const compressed = await compressImage(file)
   const imageId = newId()
   await db.putBlob(bookId, imageId, compressed.bytes, compressed.mime)
-  const src = URL.createObjectURL(new Blob([toArrayBuffer(compressed.bytes)], { type: compressed.mime }))
+  const src = rememberBlobUrl(
+    `${bookId}::${imageId}`,
+    new Blob([toArrayBuffer(compressed.bytes)], { type: compressed.mime }),
+  )
   return { imageId, src }
 }
 
 export async function blobUrlFor(bookId: string, imageId: string): Promise<string | null> {
   const blob = await db.getBlob(bookId, imageId)
   if (!blob) return null
-  return URL.createObjectURL(new Blob([toArrayBuffer(blob.data)], { type: blob.mime }))
+  return rememberBlobUrl(
+    `${bookId}::${imageId}`,
+    new Blob([toArrayBuffer(blob.data)], { type: blob.mime }),
+  )
 }
 
 export async function dataUrlFor(bookId: string, imageId: string): Promise<string | null> {
@@ -336,8 +362,10 @@ export async function moveChapter(bookId: string, chapterId: string, dir: -1 | 1
 }
 
 export async function saveCover(bookId: string, file: Blob): Promise<BookRecord> {
+  await assertRoomFor(file.size)
   const book = await getBook(bookId)
   const compressed = await compressImage(file)
+  revokeBlobUrl(`${bookId}::cover`)
   await db.putBlob(bookId, 'cover', compressed.bytes, compressed.mime)
   return saveBook({ ...book, coverPath: `OEBPS/cover.${compressed.ext}` })
 }
@@ -459,6 +487,7 @@ export async function trashBook(id: string): Promise<void> {
   if (!dump) return
   await db.putTrash(dump)
   await db.deleteBookData(id)
+  revokeBookImages(id, false)
 }
 
 export async function restoreBook(id: string): Promise<void> {
@@ -470,6 +499,52 @@ export async function restoreBook(id: string): Promise<void> {
 
 export async function purgeTrash(id: string): Promise<void> {
   await db.deleteTrash(id)
+}
+
+export async function trashSummary(): Promise<{ count: number; bytes: number }> {
+  const dumps = await db.listTrash()
+  return {
+    count: dumps.length,
+    bytes: dumps.reduce((sum, dump) => sum + dumpSizeBytes(dump), 0),
+  }
+}
+
+export async function emptyTrash(): Promise<void> {
+  const dumps = await db.listTrash()
+  await Promise.all(dumps.map((dump) => db.deleteTrash(dump.id)))
+}
+
+export async function purgeExpiredTrash(nowMs = Date.now()): Promise<number> {
+  const dumps = await db.listTrash()
+  const expired = dumps.filter((dump) => isTrashExpired(dump.trashedAt, nowMs))
+  await Promise.all(expired.map((dump) => db.deleteTrash(dump.id)))
+  return expired.length
+}
+
+export async function snapshotChapter(bookId: string, chapterId: string): Promise<ChapterDump | undefined> {
+  const book = await getBook(bookId)
+  const chapter = book.chapters.find((ch) => ch.id === chapterId)
+  if (!chapter) return undefined
+  return {
+    bookId,
+    chapter,
+    doc: await db.getDoc(bookId, chapterId),
+    entry: await db.getEntry(bookId, chapter.href),
+  }
+}
+
+export async function restoreChapter(dump: ChapterDump): Promise<BookRecord> {
+  const book = await getBook(dump.bookId)
+  if (book.chapters.some((ch) => ch.id === dump.chapter.id)) return book
+  const insertAt = Math.min(dump.chapter.spineIndex, book.chapters.length)
+  const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
+  const next = [...sorted.slice(0, insertAt), dump.chapter, ...sorted.slice(insertAt)].map((ch, index) => ({
+    ...ch,
+    spineIndex: index,
+  }))
+  if (dump.doc) await db.putDoc(dump.bookId, dump.chapter.id, dump.doc)
+  if (dump.entry) await db.putEntry(dump.bookId, dump.chapter.href, dump.entry)
+  return saveBook({ ...book, chapters: next })
 }
 
 export async function addAnnotation(
@@ -593,6 +668,7 @@ export async function moveChapterTo(bookId: string, chapterId: string, toIndex: 
 }
 
 export async function importTextBook(raw: string, filename: string): Promise<BookRecord> {
+  await assertRoomFor(new TextEncoder().encode(raw).byteLength)
   const chapters = splitImportedText(raw, filename)
   const created = await createBook()
   const title = filename.replace(/\.(txt|md|markdown)$/i, '') || created.title
@@ -658,6 +734,58 @@ export async function getChapterLoss(bookId: string, chapterId: string) {
   const bytes = await db.getEntry(bookId, chapter.href)
   if (!bytes) return emptyLoss()
   return analyzeSimplifyLoss(new TextDecoder().decode(bytes))
+}
+
+export async function exportShelfBackup(): Promise<Uint8Array> {
+  const list = await db.listBooks()
+  const books = []
+  for (const book of list) {
+    books.push({
+      book,
+      entries: [...(await db.getAllEntries(book.id))].map(([path, data]) => ({ path, data })),
+      docs: [...(await db.getAllDocs(book.id))].map(([chapterId, doc]) => ({ chapterId, doc })),
+      blobs: await db.listBlobs(book.id),
+      annotations: await db.listAnnotations(book.id),
+    })
+  }
+  return packBackup({
+    version: 1,
+    exportedAt: now(),
+    settings: loadSettings(),
+    books,
+  })
+}
+
+export async function importShelfBackup(bytes: Uint8Array): Promise<{ imported: number; renamed: number }> {
+  await assertRoomFor(bytes.byteLength)
+  const data = await unpackBackup(bytes)
+  let imported = 0
+  let renamed = 0
+  for (const item of data.books) {
+    let next = item
+    if (await db.getBook(item.book.id)) {
+      const id = newId()
+      next = {
+        book: { ...item.book, id },
+        entries: item.entries,
+        docs: item.docs,
+        blobs: item.blobs,
+        annotations: item.annotations.map((note) => ({ ...note, id: newId(), bookId: id })),
+      }
+      renamed += 1
+    }
+    await db.putBook(next.book)
+    for (const entry of next.entries) await db.putEntry(next.book.id, entry.path, entry.data)
+    for (const doc of next.docs) await db.putDoc(next.book.id, doc.chapterId, doc.doc)
+    for (const blob of next.blobs) await db.putBlob(next.book.id, blob.id, blob.data, blob.mime)
+    for (const note of next.annotations) await db.putAnnotation(note)
+    imported += 1
+  }
+  return { imported, renamed }
+}
+
+export function releaseBookImages(bookId: string): void {
+  revokeBookImages(bookId)
 }
 
 export { messageForUnknown }

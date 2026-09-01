@@ -6,6 +6,7 @@ import {
   stripChapterOrdinal,
   withChapterHeading,
   withoutLeadingH1,
+  wouldSplitByH1,
 } from './headings'
 import { replaceAllInDoc } from './replace'
 import type { TiptapDoc } from '../types/book'
@@ -110,6 +111,24 @@ describe('splitDocByH1', () => {
     expect(parts).toHaveLength(2)
     expect(parts[0]?.title).toBe('旧章名')
     expect(parts[1]?.title).toBe('夜宴')
+  })
+
+  it('wouldSplitByH1 is true only when a save would create extra chapters', () => {
+    expect(
+      wouldSplitByH1({
+        type: 'doc',
+        content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '一' }] }],
+      }),
+    ).toBe(false)
+    expect(
+      wouldSplitByH1({
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '一' }] },
+          { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '二' }] },
+        ],
+      }),
+    ).toBe(true)
   })
 })
 

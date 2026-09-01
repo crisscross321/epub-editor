@@ -1160,6 +1160,17 @@ textarea,
   margin: 8px 18px 0;
 }
 
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px calc(12px + var(--safe-bottom));
+}
+
+.chapter-nav .btn {
+  flex: 1;
+}
+
 [data-theme='night'] .banner-ok {
   color: #c5d4b4;
 }

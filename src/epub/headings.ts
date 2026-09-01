@@ -104,6 +104,10 @@ export function splitDocByH1(doc: TiptapDoc, fallbackTitle: string): ChapterSlic
   }))
 }
 
+export function wouldSplitByH1(doc: TiptapDoc, fallbackTitle = ''): boolean {
+  return splitDocByH1(doc, fallbackTitle).length > 1
+}
+
 export function ensureLeadingH1(doc: TiptapDoc, title: string): TiptapDoc {
   const name = displayChapterName(title)
   if (!name) return withoutLeadingH1(doc)

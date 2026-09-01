@@ -42,6 +42,13 @@ export interface Annotation {
   createdAt: string
 }
 
+export interface ChapterDump {
+  bookId: string
+  chapter: ChapterIndex
+  doc?: TiptapDoc
+  entry?: Uint8Array
+}
+
 export interface TrashDump {
   id: string
   book: BookRecord
