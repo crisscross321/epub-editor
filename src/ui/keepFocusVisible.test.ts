@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  bindKeyboardReveal,
   keyboardPadding,
   overlayFromViewport,
   pickCaretRect,
   scrollDeltaForRect,
+  shouldRevealFocusedInput,
   visibleBoundsWithKeyboard,
 } from './keepFocusVisible'
 
@@ -94,6 +96,45 @@ describe('visibleBoundsWithKeyboard', () => {
       top: 0,
       bottom: 452,
     })
+  })
+})
+
+describe('shouldRevealFocusedInput', () => {
+  it('follows a collapsed caret so the last lines stay above the IME', () => {
+    expect(shouldRevealFocusedInput({ collapsed: true, composing: false })).toBe(true)
+  })
+
+  it('does not steal the viewport while the user is dragging a text selection', () => {
+    expect(shouldRevealFocusedInput({ collapsed: false, composing: false })).toBe(false)
+  })
+
+  it('still follows the composing range so IME candidates do not cover new text', () => {
+    expect(shouldRevealFocusedInput({ collapsed: false, composing: true })).toBe(true)
+  })
+})
+
+describe('bindKeyboardReveal', () => {
+  it('does not scroll the page while a contenteditable range is being dragged', () => {
+    const editor = document.createElement('div')
+    editor.className = 'ProseMirror'
+    editor.contentEditable = 'true'
+    editor.append('茶峒临溪而建，白塔在山后。')
+    document.body.appendChild(editor)
+    editor.focus()
+    const text = editor.firstChild as Text
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 6)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+    const spy = vi.spyOn(document.scrollingElement ?? document.documentElement, 'scrollBy')
+    const unbind = bindKeyboardReveal()
+    document.dispatchEvent(new Event('selectionchange'))
+    expect(spy).not.toHaveBeenCalled()
+    unbind()
+    spy.mockRestore()
+    editor.remove()
   })
 })
 

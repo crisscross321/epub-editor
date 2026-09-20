@@ -3,6 +3,9 @@ import {
   canApplyChapterJump,
   chapterIdAtScroll,
   chapterWindow,
+  jumpSettled,
+  mergeChapterBodies,
+  nextHydrationRange,
   offsetInChapter,
   scrollDeltaForWindowShift,
   scrollTopForOffset,
@@ -51,6 +54,51 @@ describe('chapterIdAtScroll', () => {
     ]
     expect(chapterIdAtScroll(stub, 3300, 700, 4000)).toBe('a')
   })
+
+  it('stays on the second-to-last chapter when the last chapter is shorter than the viewport', () => {
+    const boxes = [
+      { id: 'prev', top: 0, height: 1200 },
+      { id: 'current', top: 1200, height: 3000 },
+      { id: 'empty', top: 4200, height: 60 },
+    ]
+    expect(chapterIdAtScroll(boxes, 3500, 700, 4260)).toBe('current')
+    expect(chapterIdAtScroll(boxes, 3560, 700, 4260)).toBe('current')
+  })
+})
+
+describe('nextHydrationRange', () => {
+  it('does not drop the chapter above the second-to-last when index flickers onto an empty last chapter', () => {
+    const onSecondLast = nextHydrationRange({ from: 0, to: -1 }, 3, 5, true)
+    expect(onSecondLast).toEqual({ from: 2, to: 4 })
+    expect(nextHydrationRange(onSecondLast, 4, 5)).toEqual({ from: 2, to: 4 })
+    expect(nextHydrationRange({ from: 2, to: 4 }, 3, 5)).toEqual({ from: 2, to: 4 })
+  })
+
+  it('expands forward as the reader advances and only drops chapters far behind', () => {
+    const start = nextHydrationRange({ from: 0, to: -1 }, 0, 8, true)
+    expect(start).toEqual({ from: 0, to: 2 })
+    const later = nextHydrationRange(start, 4, 8)
+    expect(later.from).toBe(2)
+    expect(later.to).toBe(6)
+  })
+
+  it('resets around the jump target instead of hydrating the whole prefix', () => {
+    expect(nextHydrationRange({ from: 0, to: 2 }, 10, 12, true)).toEqual({ from: 9, to: 11 })
+  })
+})
+
+describe('jumpSettled', () => {
+  it('settles when the stream cannot scroll as far as the target start', () => {
+    expect(
+      jumpSettled({ desired: 4000, actual: 3300, maxScroll: 3300, tries: 0 }),
+    ).toBe(true)
+  })
+
+  it('keeps waiting when the target is reachable but not aligned yet', () => {
+    expect(
+      jumpSettled({ desired: 800, actual: 0, maxScroll: 4000, tries: 0 }),
+    ).toBe(false)
+  })
 })
 
 describe('offset and restore', () => {
@@ -81,9 +129,9 @@ describe('scrollDeltaForWindowShift', () => {
 })
 
 describe('canApplyChapterJump', () => {
-  it('waits until a previous chapter has height so the jump is not to the previous start', () => {
-    expect(canApplyChapterJump({ targetHeight: 800, previousHeight: 0 })).toBe(false)
-    expect(canApplyChapterJump({ targetHeight: 800, previousHeight: 1200 })).toBe(true)
+  it('jumps once the target chapter has height even if the previous slot is still a spacer', () => {
+    expect(canApplyChapterJump({ targetHeight: 800, previousHeight: 0 })).toBe(true)
+    expect(canApplyChapterJump({ targetHeight: 0, previousHeight: 1200 })).toBe(false)
   })
 
   it('jumps immediately when there is no previous chapter', () => {
@@ -96,5 +144,28 @@ describe('shouldShiftScrollForResize', () => {
     expect(shouldShiftScrollForResize(true, 400)).toBe(true)
     expect(shouldShiftScrollForResize(false, 400)).toBe(false)
     expect(shouldShiftScrollForResize(true, 0)).toBe(false)
+  })
+
+  it('shifts scroll when the current first chapter changes height after leaving its start', () => {
+    expect(shouldShiftScrollForResize(false, -800, true)).toBe(true)
+    expect(shouldShiftScrollForResize(false, 800, true)).toBe(true)
+    expect(shouldShiftScrollForResize(false, 800, false)).toBe(false)
+  })
+})
+
+describe('mergeChapterBodies', () => {
+  it('keeps the previous record when refetched HTML is unchanged', () => {
+    const prev = { ch1: '<p>茶峒</p>', ch2: '<p>白塔</p>' }
+    expect(mergeChapterBodies(prev, [
+      { id: 'ch1', body: '<p>茶峒</p>' },
+      { id: 'ch2', body: '<p>白塔</p>' },
+    ])).toBe(prev)
+  })
+
+  it('replaces only chapters whose HTML actually changed', () => {
+    const prev = { ch1: '<p>茶峒</p>', ch2: '<p>白塔</p>' }
+    const next = mergeChapterBodies(prev, [{ id: 'ch2', body: '<p>白塔改</p>' }])
+    expect(next).not.toBe(prev)
+    expect(next).toEqual({ ch1: '<p>茶峒</p>', ch2: '<p>白塔改</p>' })
   })
 })

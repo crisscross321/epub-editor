@@ -46,6 +46,10 @@ export function visibleBoundsWithKeyboard(
   return { top, bottom: vvBottom - extraCover }
 }
 
+export function shouldRevealFocusedInput(args: { collapsed: boolean; composing: boolean }): boolean {
+  return args.composing || args.collapsed
+}
+
 export function pickCaretRect(
   rangeRect: { top: number; bottom: number; width: number; height: number },
   fallback: { top: number; bottom: number } | null,
@@ -114,6 +118,7 @@ export function revealFocusedInput(baselineInnerHeight = window.innerHeight): vo
 export function bindKeyboardReveal(): () => void {
   const vv = window.visualViewport
   let baseline = window.innerHeight
+  let composing = false
   const vk = (navigator as Navigator & {
     virtualKeyboard?: { addEventListener: (type: string, listener: () => void) => void; removeEventListener: (type: string, listener: () => void) => void }
   }).virtualKeyboard
@@ -124,18 +129,32 @@ export function bindKeyboardReveal(): () => void {
   const reveal = () => {
     if (!isEditing()) baseline = window.innerHeight
     syncInset()
+    const sel = window.getSelection()
+    const collapsed = !sel || sel.rangeCount === 0 || sel.isCollapsed
+    if (!shouldRevealFocusedInput({ collapsed, composing })) return
     void document.documentElement.offsetHeight
     revealFocusedInput(baseline)
     requestAnimationFrame(() => revealFocusedInput(baseline))
   }
 
   const onFocusOut = () => requestAnimationFrame(reveal)
+  const onCompositionStart = () => {
+    composing = true
+    reveal()
+  }
+  const onCompositionEnd = () => {
+    composing = false
+    reveal()
+  }
   vv?.addEventListener('resize', reveal)
   vv?.addEventListener('scroll', reveal)
   window.addEventListener('resize', reveal)
   document.addEventListener('selectionchange', reveal)
   document.addEventListener('focusin', reveal)
   document.addEventListener('focusout', onFocusOut)
+  document.addEventListener('compositionstart', onCompositionStart)
+  document.addEventListener('compositionupdate', reveal)
+  document.addEventListener('compositionend', onCompositionEnd)
   vk?.addEventListener('geometrychange', reveal)
   syncInset()
   return () => {
@@ -145,6 +164,9 @@ export function bindKeyboardReveal(): () => void {
     document.removeEventListener('selectionchange', reveal)
     document.removeEventListener('focusin', reveal)
     document.removeEventListener('focusout', onFocusOut)
+    document.removeEventListener('compositionstart', onCompositionStart)
+    document.removeEventListener('compositionupdate', reveal)
+    document.removeEventListener('compositionend', onCompositionEnd)
     vk?.removeEventListener('geometrychange', reveal)
   }
 }

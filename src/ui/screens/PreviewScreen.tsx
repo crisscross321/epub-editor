@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import * as books from '../../app/bookService'
 import { readingPercent } from '../../app/progress'
 import { countChars, readingMinutes, textFromHtml } from '../../content/text'
@@ -12,11 +12,14 @@ import {
   canApplyChapterJump,
   chapterIdAtScroll,
   chapterWindow,
+  jumpSettled,
+  mergeChapterBodies,
+  nextHydrationRange,
   offsetInChapter,
   readChapterBoxes,
-  scrollDeltaForWindowShift,
   scrollTopForOffset,
   shouldShiftScrollForResize,
+  type ChapterRange,
 } from '../../reader/stream'
 import { fontSizePx, type AppSettings } from '../../storage/settings'
 import type { Annotation, BookRecord } from '../../types/book'
@@ -37,13 +40,29 @@ function escapeAttr(id: string): string {
   return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id
 }
 
-function previousChapterElement(el: HTMLElement): HTMLElement | null {
-  let prev = el.previousElementSibling as HTMLElement | null
-  while (prev && !prev.hasAttribute('data-chapter-id')) {
-    prev = prev.previousElementSibling as HTMLElement | null
+const PreviewChapter = memo(function PreviewChapter(props: {
+  id: string
+  html: string | null
+  spacerHeight: number
+}) {
+  if (props.html == null) {
+    return (
+      <article
+        className="preview-chapter is-spacer"
+        data-chapter-id={props.id}
+        style={{ height: props.spacerHeight }}
+        aria-hidden
+      />
+    )
   }
-  return prev
-}
+  return (
+    <article
+      className="preview-chapter"
+      data-chapter-id={props.id}
+      dangerouslySetInnerHTML={{ __html: props.html }}
+    />
+  )
+})
 
 export function PreviewScreen(props: {
   book: BookRecord
@@ -56,9 +75,14 @@ export function PreviewScreen(props: {
   onProgress: (chapterId: string, offset: number) => void
   onOpenSettings: () => void
 }) {
+  const bookChaptersRef = useRef(props.book.chapters)
+  bookChaptersRef.current = props.book.chapters
+  const chapterListKey = props.book.chapters
+    .map((ch) => `${ch.spineIndex}:${ch.id}:${ch.title}:${ch.state}`)
+    .join('|')
   const chapters = useMemo(
-    () => [...props.book.chapters].sort((a, b) => a.spineIndex - b.spineIndex),
-    [props.book.chapters],
+    () => [...bookChaptersRef.current].sort((a, b) => a.spineIndex - b.spineIndex),
+    [chapterListKey],
   )
   const start = Math.max(
     0,
@@ -82,7 +106,10 @@ export function PreviewScreen(props: {
   const frame = useRef<HTMLIFrameElement>(null)
   const streamRef = useRef<HTMLDivElement>(null)
   const heightMap = useRef(new Map<string, number>())
-  const windowFromRef = useRef(0)
+  const hydResetRef = useRef(true)
+  const initialHyd = chapterWindow(start < 0 ? 0 : start, chapters.length)
+  const hydRef = useRef<ChapterRange>(initialHyd)
+  const [hyd, setHyd] = useState<ChapterRange>(initialHyd)
   const pendingJump = useRef<{ chapterId: string; offset: number } | null>(null)
   const jumpTries = useRef(0)
   const ignoreScroll = useRef(false)
@@ -98,8 +125,7 @@ export function PreviewScreen(props: {
   bookIdRef.current = props.book.id
   queryRef.current = query
 
-  const win = paged ? { from: index, to: index } : chapterWindow(index, chapters.length)
-  const windowChapters = chapters.slice(Math.max(0, win.from), Math.max(0, win.to + 1))
+  const win = paged ? { from: index, to: index } : hyd
 
   const css = readerBodyCss(props.settings, chapter?.state === 'simplified')
   const streamCss = readerBodyCss(props.settings, chapter?.state === 'simplified', '.preview-chapter')
@@ -121,7 +147,10 @@ export function PreviewScreen(props: {
         }
       : null
     jumpTries.current = 0
-    windowFromRef.current = chapterWindow(next, list.length).from
+    hydResetRef.current = true
+    const nextHyd = chapterWindow(next, list.length)
+    hydRef.current = nextHyd
+    setHyd(nextHyd)
     setOffset(pendingJump.current?.offset ?? 0)
   }, [props.book.id, props.startChapterId])
 
@@ -152,15 +181,17 @@ export function PreviewScreen(props: {
       }),
     ).then((rows) => {
       if (bookId !== bookIdRef.current || q !== queryRef.current) return
-      setBodies((prev) => {
-        const next = { ...prev }
-        for (const row of rows) next[row.id] = row.body
-        return next
-      })
+      setBodies((prev) => mergeChapterBodies(prev, rows))
       setWarnings((prev) => {
+        let changed = false
         const next = { ...prev }
-        for (const row of rows) next[row.id] = row.warning
-        return next
+        for (const row of rows) {
+          if (next[row.id] !== row.warning) {
+            next[row.id] = row.warning
+            changed = true
+          }
+        }
+        return changed ? next : prev
       })
       if (paged) setPage(0)
     })
@@ -180,6 +211,7 @@ export function PreviewScreen(props: {
 
   const jumpTo = (nextIndex: number, nextOffset = 0) => {
     if (nextIndex < 0 || nextIndex >= chapters.length) return
+    if (Math.abs(nextIndex - indexRef.current) > 2) hydResetRef.current = true
     const target = chapters[nextIndex]!
     pendingJump.current = { chapterId: target.id, offset: nextOffset }
     jumpTries.current = 0
@@ -194,15 +226,7 @@ export function PreviewScreen(props: {
     if (!jump) return
     const el = stream.querySelector(`[data-chapter-id="${escapeAttr(jump.chapterId)}"]`) as HTMLElement | null
     if (!el) return
-    const prev = previousChapterElement(el)
-    if (
-      !canApplyChapterJump({
-        targetHeight: el.offsetHeight,
-        previousHeight: prev ? prev.offsetHeight : null,
-      })
-    ) {
-      return
-    }
+    if (!canApplyChapterJump({ targetHeight: el.offsetHeight })) return
     const desired = scrollTopForOffset(
       stream.clientHeight,
       {
@@ -214,8 +238,9 @@ export function PreviewScreen(props: {
     )
     ignoreScroll.current = true
     stream.scrollTop = desired
-    const aligned = jump.offset === 0 ? Math.abs(el.offsetTop - stream.scrollTop) <= 8 : true
-    if (aligned) {
+    jumpTries.current += 1
+    const maxScroll = Math.max(0, stream.scrollHeight - stream.clientHeight)
+    if (jumpSettled({ desired, actual: stream.scrollTop, maxScroll, tries: jumpTries.current })) {
       pendingJump.current = null
       jumpTries.current = 0
       for (const node of stream.querySelectorAll<HTMLElement>('[data-chapter-id]')) {
@@ -223,16 +248,10 @@ export function PreviewScreen(props: {
         if (id) heightMap.current.set(id, node.offsetHeight)
       }
     } else {
-      jumpTries.current += 1
-      if (jumpTries.current > 30) {
-        pendingJump.current = null
-        jumpTries.current = 0
-      } else {
-        window.requestAnimationFrame(() => {
-          const next = streamRef.current
-          if (next) applyJump(next)
-        })
-      }
+      window.requestAnimationFrame(() => {
+        const next = streamRef.current
+        if (next) applyJump(next)
+      })
     }
     window.requestAnimationFrame(() => {
       ignoreScroll.current = false
@@ -246,27 +265,21 @@ export function PreviewScreen(props: {
     }
     const stream = streamRef.current
     if (!stream) return
-    const { from } = chapterWindow(index, chapters.length)
+    const reset = hydResetRef.current || wasPaged.current
+    hydResetRef.current = false
     if (wasPaged.current) {
       wasPaged.current = false
-      windowFromRef.current = from
       if (!pendingJump.current && chapter) {
         pendingJump.current = { chapterId: chapter.id, offset: offsetRef.current }
       }
-    } else if (from !== windowFromRef.current) {
-      ignoreScroll.current = true
-      stream.scrollTop += scrollDeltaForWindowShift(
-        windowFromRef.current,
-        from,
-        (i) => heightMap.current.get(chapters[i]?.id ?? '') ?? 0,
-      )
-      windowFromRef.current = from
-      window.requestAnimationFrame(() => {
-        ignoreScroll.current = false
-      })
+    }
+    const nextHyd = nextHydrationRange(hydRef.current, index, chapters.length, reset)
+    if (nextHyd.from !== hydRef.current.from || nextHyd.to !== hydRef.current.to) {
+      hydRef.current = nextHyd
+      setHyd(nextHyd)
     }
     applyJump(stream)
-  }, [bodies, chapter, chapters, index, paged, win.from])
+  }, [bodies, chapter, chapters, index, paged])
 
   useEffect(() => {
     if (paged) return
@@ -282,7 +295,7 @@ export function PreviewScreen(props: {
         const nextH = el.offsetHeight
         const prevH = heightMap.current.get(id)
         heightMap.current.set(id, nextH)
-        if (pendingJump.current || prevH == null || prevH === 0) {
+        if (pendingJump.current || prevH == null) {
           if (pendingJump.current) applyJump(stream)
           continue
         }
@@ -293,7 +306,10 @@ export function PreviewScreen(props: {
         const resizedIsBeforeCurrent = Boolean(
           currentEl && (el.compareDocumentPosition(currentEl) & Node.DOCUMENT_POSITION_FOLLOWING),
         )
-        if (shouldShiftScrollForResize(resizedIsBeforeCurrent, nextH - prevH)) {
+        const resizedCurrentWhileScrolled = Boolean(
+          id === currentId && currentEl && stream.scrollTop > currentEl.offsetTop + 1,
+        )
+        if (shouldShiftScrollForResize(resizedIsBeforeCurrent, nextH - prevH, resizedCurrentWhileScrolled)) {
           ignoreScroll.current = true
           stream.scrollTop += nextH - prevH
           window.requestAnimationFrame(() => {
@@ -305,7 +321,7 @@ export function PreviewScreen(props: {
     })
     for (const node of nodes) ro.observe(node)
     return () => ro.disconnect()
-  }, [bodies, paged, win.from, win.to])
+  }, [bodies, paged, hyd.from, hyd.to, chapters.length])
 
   const onStreamScroll = () => {
     const stream = streamRef.current
@@ -468,12 +484,12 @@ export function PreviewScreen(props: {
           onTouchEnd={emitStreamSel}
         >
           <style>{streamCss}</style>
-          {windowChapters.map((ch) => (
-            <article
+          {chapters.map((ch, i) => (
+            <PreviewChapter
               key={ch.id}
-              className="preview-chapter"
-              data-chapter-id={ch.id}
-              dangerouslySetInnerHTML={{ __html: bodies[ch.id] ?? '' }}
+              id={ch.id}
+              html={i >= hyd.from && i <= hyd.to ? (bodies[ch.id] ?? '') : null}
+              spacerHeight={heightMap.current.get(ch.id) ?? 0}
             />
           ))}
         </div>

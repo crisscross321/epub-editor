@@ -27,7 +27,14 @@ function render(ui: ReactElement) {
     root.render(ui)
   })
   roots.push({ root, container })
-  return container
+  return {
+    container,
+    rerender(next: ReactElement) {
+      act(() => {
+        root.render(next)
+      })
+    },
+  }
 }
 
 afterEach(() => {
@@ -103,7 +110,7 @@ function swipe(target: EventTarget, fromX: number, toX: number) {
 
 describe('PreviewScreen chapter navigation', () => {
   it('does not switch chapters when the reader is swiped horizontally', async () => {
-    const container = render(screen())
+    const { container } = render(screen())
     await flush()
     const stream = container.querySelector('.preview-stream')
     expect(stream).toBeTruthy()
@@ -116,14 +123,14 @@ describe('PreviewScreen chapter navigation', () => {
   })
 
   it('opens chapter 2 from the chapter list as 第 2 章', async () => {
-    const container = render(screen({ startChapterId: 'ch2' }))
+    const { container } = render(screen({ startChapterId: 'ch2' }))
     await flush()
     expect(heading(container)).toContain('第 2 章 白塔')
     expect(heading(container)).not.toContain('第 1 章')
   })
 
   it('keeps the next chapter in the scroll stream', async () => {
-    const container = render(screen())
+    const { container } = render(screen())
     await flush()
     const stream = container.querySelector('.preview-stream')
     expect(stream?.querySelector('[data-chapter-id="ch1"]')).toBeTruthy()
@@ -132,7 +139,7 @@ describe('PreviewScreen chapter navigation', () => {
   })
 
   it('switches chapters with 上一章 and 下一章 buttons', async () => {
-    const container = render(screen())
+    const { container } = render(screen())
     await flush()
 
     expect(heading(container)).toContain('第 1 章 茶峒')
@@ -150,5 +157,58 @@ describe('PreviewScreen chapter navigation', () => {
     })
     await flush()
     expect(heading(container)).toContain('第 1 章 茶峒')
+  })
+
+  it('keeps a slot for every chapter, including those outside the hydration window', async () => {
+    const longBook: BookRecord = {
+      ...book,
+      chapters: [
+        ...book.chapters,
+        { id: 'ch4', href: 'd.xhtml', title: '傩送', spineIndex: 3, state: 'simplified' },
+        { id: 'ch5', href: 'e.xhtml', title: '渡船', spineIndex: 4, state: 'simplified' },
+      ],
+    }
+    const { container } = render(screen({ book: longBook }))
+    await flush()
+    const stream = container.querySelector('.preview-stream')
+    expect([...stream!.querySelectorAll('[data-chapter-id]')].map((el) => el.getAttribute('data-chapter-id'))).toEqual([
+      'ch1',
+      'ch2',
+      'ch3',
+      'ch4',
+      'ch5',
+    ])
+  })
+
+  it('does not unmount earlier chapters when advancing onto the last chapter', async () => {
+    const { container } = render(screen({ startChapterId: 'ch2' }))
+    await flush()
+    act(() => {
+      button(container, '下一章')!.click()
+    })
+    await flush()
+    expect(heading(container)).toContain('第 3 章 翠翠')
+    const stream = container.querySelector('.preview-stream')
+    expect(stream?.querySelector('[data-chapter-id="ch1"]')).toBeTruthy()
+    expect(stream?.querySelector('[data-chapter-id="ch2"]')).toBeTruthy()
+    expect(stream?.querySelector('[data-chapter-id="ch3"]')).toBeTruthy()
+  })
+
+  it('keeps already rendered chapter HTML when only reading progress is cloned', async () => {
+    const { container, rerender } = render(screen())
+    await flush()
+    const paragraph = container.querySelector('[data-chapter-id="ch1"] p')
+    expect(paragraph).toBeTruthy()
+    rerender(
+      screen({
+        book: {
+          ...book,
+          chapters: book.chapters.map((ch) => ({ ...ch })),
+          readOffset: 0.8,
+        },
+      }),
+    )
+    await flush()
+    expect(container.querySelector('[data-chapter-id="ch1"] p')).toBe(paragraph)
   })
 })
