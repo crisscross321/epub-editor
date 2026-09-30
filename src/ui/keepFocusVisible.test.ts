@@ -101,15 +101,15 @@ describe('visibleBoundsWithKeyboard', () => {
 
 describe('shouldRevealFocusedInput', () => {
   it('follows a collapsed caret so the last lines stay above the IME', () => {
-    expect(shouldRevealFocusedInput({ collapsed: true, composing: false })).toBe(true)
+    expect(shouldRevealFocusedInput({ collapsed: true, interacting: false })).toBe(true)
   })
 
   it('does not steal the viewport while the user is dragging a text selection', () => {
-    expect(shouldRevealFocusedInput({ collapsed: false, composing: false })).toBe(false)
+    expect(shouldRevealFocusedInput({ collapsed: false, interacting: false })).toBe(false)
   })
 
-  it('still follows the composing range so IME candidates do not cover new text', () => {
-    expect(shouldRevealFocusedInput({ collapsed: false, composing: true })).toBe(true)
+  it('does not reveal while a touch gesture is active', () => {
+    expect(shouldRevealFocusedInput({ collapsed: true, interacting: true })).toBe(false)
   })
 })
 

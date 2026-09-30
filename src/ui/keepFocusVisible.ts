@@ -47,8 +47,9 @@ export function visibleBoundsWithKeyboard(
   return { top, bottom: vvBottom - extraCover }
 }
 
-export function shouldRevealFocusedInput(args: { collapsed: boolean; composing: boolean }): boolean {
-  return args.composing || args.collapsed
+export function shouldRevealFocusedInput(args: { collapsed: boolean; interacting: boolean }): boolean {
+  // Never chase a selection's bounding box, including during IME composition.
+  return args.collapsed && !args.interacting
 }
 
 export function pickCaretRect(
@@ -105,6 +106,8 @@ function focusedRect(): { top: number; bottom: number } | null {
 }
 
 export function revealFocusedInput(baselineInnerHeight = window.innerHeight): void {
+  const selection = window.getSelection()
+  if (selection?.rangeCount && !selection.isCollapsed) return
   const vv = window.visualViewport
   const pad = currentPadding(baselineInnerHeight)
   const bounds = visibleBoundsWithKeyboard(window.innerHeight, vv, pad)
@@ -120,54 +123,107 @@ export function revealFocusedInput(baselineInnerHeight = window.innerHeight): vo
 export function bindKeyboardReveal(): () => void {
   const vv = window.visualViewport
   let baseline = window.innerHeight
-  let composing = false
+  let frame: number | null = null
+  let disposed = false
+  let touching = false
+  const pointers = new Set<number>()
   const vk = (navigator as Navigator & {
     virtualKeyboard?: { addEventListener: (type: string, listener: () => void) => void; removeEventListener: (type: string, listener: () => void) => void }
   }).virtualKeyboard
 
   const syncInset = () => {
-    document.documentElement.style.setProperty('--keyboard-inset', `${currentPadding(baseline)}px`)
+    if (!isEditing()) baseline = window.innerHeight
+    const value = `${currentPadding(baseline)}px`
+    const style = document.documentElement.style
+    if (style.getPropertyValue('--keyboard-inset') !== value) style.setProperty('--keyboard-inset', value)
+  }
+  const cancelReveal = () => {
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
+  }
+  const canReveal = () => {
+    if (disposed || !isEditing()) return false
+    const sel = window.getSelection()
+    return shouldRevealFocusedInput({
+      collapsed: !sel || sel.rangeCount === 0 || sel.isCollapsed,
+      interacting: touching || pointers.size > 0,
+    })
   }
   const reveal = () => {
-    if (!isEditing()) baseline = window.innerHeight
+    cancelReveal()
     syncInset()
-    if (!isEditing()) return
-    const sel = window.getSelection()
-    const collapsed = !sel || sel.rangeCount === 0 || sel.isCollapsed
-    if (!shouldRevealFocusedInput({ collapsed, composing })) return
-    void document.documentElement.offsetHeight
+    if (!canReveal()) return
     revealFocusedInput(baseline)
-    requestAnimationFrame(() => revealFocusedInput(baseline))
+    const scrollTop = document.scrollingElement?.scrollTop ?? window.scrollY
+    frame = requestAnimationFrame(() => {
+      frame = null
+      // Native edge-scroll or the user may have moved the viewport meanwhile.
+      const currentScroll = document.scrollingElement?.scrollTop ?? window.scrollY
+      if (canReveal() && currentScroll === scrollTop) revealFocusedInput(baseline)
+    })
   }
-
-  const onFocusOut = () => requestAnimationFrame(reveal)
-  const onCompositionStart = () => {
-    composing = true
-    reveal()
+  const onSelectionChange = () => {
+    // Selection handles and native edge auto-scroll own the viewport. Inset
+    // maintenance must not turn a selectionchange into a scroll command.
+    cancelReveal()
+    syncInset()
   }
-  const onCompositionEnd = () => {
-    composing = false
-    reveal()
+  const onPointerDown = (event: PointerEvent) => {
+    pointers.add(event.pointerId)
+    cancelReveal()
+  }
+  const onPointerEnd = (event: PointerEvent) => { pointers.delete(event.pointerId) }
+  const onTouchStart = () => {
+    touching = true
+    cancelReveal()
+  }
+  const onTouchEnd = (event: TouchEvent) => { touching = event.touches.length > 0 }
+  const onBlur = () => {
+    pointers.clear()
+    touching = false
+    cancelReveal()
+  }
+  const onFocusOut = () => {
+    cancelReveal()
+    frame = requestAnimationFrame(() => {
+      frame = null
+      if (!disposed) syncInset()
+    })
   }
   vv?.addEventListener('resize', reveal)
   window.addEventListener('resize', reveal)
-  document.addEventListener('selectionchange', reveal)
+  window.addEventListener('blur', onBlur)
+  document.addEventListener('selectionchange', onSelectionChange)
   document.addEventListener('focusin', reveal)
   document.addEventListener('focusout', onFocusOut)
-  document.addEventListener('compositionstart', onCompositionStart)
-  document.addEventListener('compositionupdate', reveal)
-  document.addEventListener('compositionend', onCompositionEnd)
+  document.addEventListener('input', reveal)
+  document.addEventListener('compositionend', reveal)
+  document.addEventListener('pointerdown', onPointerDown, true)
+  document.addEventListener('pointerup', onPointerEnd, true)
+  document.addEventListener('pointercancel', onPointerEnd, true)
+  document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true })
+  document.addEventListener('touchend', onTouchEnd, true)
+  document.addEventListener('touchcancel', onTouchEnd, true)
   vk?.addEventListener('geometrychange', reveal)
   syncInset()
   return () => {
+    disposed = true
+    cancelReveal()
     vv?.removeEventListener('resize', reveal)
     window.removeEventListener('resize', reveal)
-    document.removeEventListener('selectionchange', reveal)
+    window.removeEventListener('blur', onBlur)
+    document.removeEventListener('selectionchange', onSelectionChange)
     document.removeEventListener('focusin', reveal)
     document.removeEventListener('focusout', onFocusOut)
-    document.removeEventListener('compositionstart', onCompositionStart)
-    document.removeEventListener('compositionupdate', reveal)
-    document.removeEventListener('compositionend', onCompositionEnd)
+    document.removeEventListener('input', reveal)
+    document.removeEventListener('compositionend', reveal)
+    document.removeEventListener('pointerdown', onPointerDown, true)
+    document.removeEventListener('pointerup', onPointerEnd, true)
+    document.removeEventListener('pointercancel', onPointerEnd, true)
+    document.removeEventListener('touchstart', onTouchStart, true)
+    document.removeEventListener('touchend', onTouchEnd, true)
+    document.removeEventListener('touchcancel', onTouchEnd, true)
     vk?.removeEventListener('geometrychange', reveal)
+    document.documentElement.style.removeProperty('--keyboard-inset')
   }
 }
