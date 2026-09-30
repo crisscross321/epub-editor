@@ -21,13 +21,15 @@ export function Onboarding(props: { onDone: () => void }) {
   return (
     <div className="onboard">
       <div className="onboard-card">
-        <p className="muted">
-          {i + 1} / {SLIDES.length}
-        </p>
+        <div className="onboard-dots" aria-label={`${i + 1} / ${SLIDES.length}`}>
+          {SLIDES.map((_, n) => (
+            <span key={n} className={n === i ? 'is-on' : ''} />
+          ))}
+        </div>
         <h2>{slide.title}</h2>
         <p>{slide.body}</p>
         <button
-          className="btn"
+          className="btn btn-block"
           type="button"
           onClick={() => {
             if (i >= SLIDES.length - 1) props.onDone()

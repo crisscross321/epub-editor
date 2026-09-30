@@ -13,45 +13,34 @@ export function FindReplaceBar(props: {
 
   return (
     <div className="findbar" onMouseDown={(e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault() }}>
-      <input
-        value={search}
-        placeholder="查找"
-        onChange={(e) => setSearch(e.target.value)}
-      />
-      <input
-        value={replacement}
-        placeholder="替换为"
-        onChange={(e) => setReplacement(e.target.value)}
-      />
-      <button
-        type="button"
-        onClick={() => setHint(props.onFind(search) ? '已定位' : '没有找到')}
-      >
-        查找
-      </button>
-      <button
-        type="button"
-        onClick={() => setHint(props.onFindNext(search) ? '已定位' : '没有找到')}
-      >
-        下一个
-      </button>
-      <button type="button" onClick={() => props.onReplace(search, replacement)}>
-        替换
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          if (!search) {
-            setHint('请输入要查找的内容')
-            return
-          }
-          const n = props.onReplaceAll(search, replacement)
-          setHint(n ? `已替换 ${n} 处` : '没有找到')
-        }}
-      >
-        全部替换
-      </button>
-      {props.onReplaceBook ? (
+      <div className="findbar-inputs">
+        <input
+          value={search}
+          placeholder="查找"
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <input
+          value={replacement}
+          placeholder="替换为"
+          onChange={(e) => setReplacement(e.target.value)}
+        />
+      </div>
+      <div className="findbar-actions">
+        <button
+          type="button"
+          onClick={() => setHint(props.onFind(search) ? '已定位' : '没有找到')}
+        >
+          查找
+        </button>
+        <button
+          type="button"
+          onClick={() => setHint(props.onFindNext(search) ? '已定位' : '没有找到')}
+        >
+          下一个
+        </button>
+        <button type="button" onClick={() => props.onReplace(search, replacement)}>
+          替换
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -59,13 +48,28 @@ export function FindReplaceBar(props: {
               setHint('请输入要查找的内容')
               return
             }
-            props.onReplaceBook?.(search, replacement)
+            const n = props.onReplaceAll(search, replacement)
+            setHint(n ? `已替换 ${n} 处` : '没有找到')
           }}
         >
-          全书替换
+          全部替换
         </button>
-      ) : null}
-      {hint ? <span className="muted">{hint}</span> : null}
+        {props.onReplaceBook ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (!search) {
+                setHint('请输入要查找的内容')
+                return
+              }
+              props.onReplaceBook?.(search, replacement)
+            }}
+          >
+            全书替换
+          </button>
+        ) : null}
+      </div>
+      {hint ? <span className="findbar-hint">{hint}</span> : null}
     </div>
   )
 }

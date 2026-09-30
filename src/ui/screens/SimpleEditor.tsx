@@ -334,7 +334,7 @@ export function SimpleEditor(props: {
       {props.onPrevChapter || props.onNextChapter ? (
         <div className="chapter-nav">
           <button
-            className="btn btn-ghost"
+            className="btn btn-line"
             type="button"
             disabled={!props.hasPrevChapter}
             onClick={props.onPrevChapter}
@@ -342,7 +342,7 @@ export function SimpleEditor(props: {
             上一章
           </button>
           <button
-            className="btn btn-ghost"
+            className="btn btn-line"
             type="button"
             disabled={!props.hasNextChapter}
             onClick={props.onNextChapter}

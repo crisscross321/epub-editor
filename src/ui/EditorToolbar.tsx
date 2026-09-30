@@ -56,6 +56,7 @@ export function EditorToolbar(props: {
         <button type="button" className={props.headingOn(0) ? 'is-on' : ''} onClick={() => props.onHeading(0)}>
           正文
         </button>
+        <span className="toolbar-sep" aria-hidden="true" />
         <button
           type="button"
           className={formatOpen || formatActive ? 'is-on' : ''}
@@ -79,12 +80,14 @@ export function EditorToolbar(props: {
         <button type="button" onClick={props.onInsertImage}>
           插图
         </button>
+        <span className="toolbar-sep" aria-hidden="true" />
         <button type="button" onClick={props.onUndo}>
           撤销
         </button>
         <button type="button" onClick={props.onRedo}>
           重做
         </button>
+        <span className="toolbar-sep" aria-hidden="true" />
         {props.onToggleOutline ? (
           <button type="button" className={props.showOutline ? 'is-on' : ''} onClick={props.onToggleOutline}>
             大纲

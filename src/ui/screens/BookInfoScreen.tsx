@@ -58,8 +58,8 @@ export function BookInfoScreen(props: {
       ) : null}
       <div className="field">
         <label>封面</label>
-        {props.coverUrl ? <img className="cover cover-lg" src={props.coverUrl} alt="封面" /> : <div className="cover cover-lg cover-empty" />}
-        <button className="btn btn-ghost" type="button" onClick={props.onCover}>
+        {props.coverUrl ? <img className="cover cover-lg" src={props.coverUrl} alt="封面" /> : <div className="cover cover-lg cover-empty">暂无封面</div>}
+        <button className="btn btn-line info-cover-btn" type="button" onClick={props.onCover}>
           从相册或文件选择封面
         </button>
       </div>

@@ -24,6 +24,7 @@ import {
 import { fontSizePx, type AppSettings } from '../../storage/settings'
 import type { Annotation, BookRecord } from '../../types/book'
 import { tightenBlankHtml } from '../blankLines'
+import { Icon, Segmented } from '../chrome'
 
 function chapterPreviewBody(html: string, heading: string, highlight: string): string {
   const tightened = tightenBlankHtml(html)
@@ -455,35 +456,40 @@ export function PreviewScreen(props: {
         <div className="reader-chrome">
           <div className="reader-top">
             <button className="icon-btn" type="button" onClick={props.onBack} aria-label="返回">
-              ←
+              <Icon name="back" size={22} />
             </button>
             <strong className="reader-book">{props.book.title || '未命名'}</strong>
-            <button className="btn btn-ghost btn-compact" type="button" onClick={() => void props.onEdit(chapter.id)}>
+            <button className="btn btn-line btn-compact" type="button" onClick={() => void props.onEdit(chapter.id)}>
               编辑
             </button>
           </div>
           <div className="reader-tools">
-            <button className="btn btn-ghost btn-compact" type="button" onClick={() => setPanel(panel === 'toc' ? null : 'toc')}>
-              目录
-            </button>
-            <button className="btn btn-ghost btn-compact" type="button" onClick={() => setPanel(panel === 'search' ? null : 'search')}>
-              搜索
-            </button>
-            <button className="btn btn-ghost btn-compact" type="button" onClick={() => setPanel(panel === 'notes' ? null : 'notes')}>
-              笔记
-            </button>
-            <button className="btn btn-ghost btn-compact" type="button" onClick={() => setPanel(panel === 'type' ? null : 'type')}>
-              版式
-            </button>
-            <button className="btn btn-ghost btn-compact" type="button" onClick={props.onOpenSettings}>
+            {(
+              [
+                ['toc', '目录'],
+                ['search', '搜索'],
+                ['notes', '笔记'],
+                ['type', '版式'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                className={panel === id ? 'is-on' : ''}
+                type="button"
+                onClick={() => setPanel(panel === id ? null : id)}
+              >
+                {label}
+              </button>
+            ))}
+            <button type="button" onClick={props.onOpenSettings}>
               设置
             </button>
           </div>
         </div>
       ) : null}
 
-      {error ? <div role="alert" className="banner">{error}<button type="button" onClick={() => setRetry(n => n + 1)}>重试</button></div> : null}
-      {!bodyHtml && !error ? <p role="status">正在加载章节…</p> : null}
+      {error ? <div role="alert" className="banner reader-banner"><span>{error}</span><button type="button" onClick={() => setRetry(n => n + 1)}>重试</button></div> : null}
+      {!bodyHtml && !error ? <p role="status" className="reader-loading">正在加载章节…</p> : null}
       {warning ? <p className="muted preview-warning">{warning}</p> : null}
 
       {paged ? (
@@ -560,8 +566,7 @@ export function PreviewScreen(props: {
 
       {panel === 'toc' ? (
         <aside className="drawer">
-          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
-          <h3>目录</h3>
+          <DrawerHead title="目录" onClose={() => setPanel(null)} />
           {chapters.map((ch, i) => {
             const items = outlineFromXhtml(i === index ? bodyHtml : '')
             return (
@@ -591,9 +596,8 @@ export function PreviewScreen(props: {
 
       {panel === 'search' ? (
         <aside className="drawer">
-          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
-          <h3>全书搜索</h3>
-          <div className="row">
+          <DrawerHead title="全书搜索" onClose={() => setPanel(null)} />
+          <div className="drawer-search">
             <input value={draftQuery} placeholder="书中的一句话" aria-label="全书搜索" onChange={(e) => { setDraftQuery(e.target.value); requestRef.current += 1; setSearching(false) }} />
             <button
               className="btn"
@@ -633,10 +637,9 @@ export function PreviewScreen(props: {
 
       {panel === 'notes' ? (
         <aside className="drawer">
-          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
-          <h3>书签与笔记</h3>
+          <DrawerHead title="书签与笔记" onClose={() => setPanel(null)} />
           <button
-            className="btn btn-ghost"
+            className="btn btn-line btn-block"
             type="button"
             onClick={() => void addNote('bookmark', exportChapterHeading(index, chapter.title))}
           >
@@ -650,7 +653,7 @@ export function PreviewScreen(props: {
               </div>
               <p>{note.text}</p>
               {note.note ? <p className="muted">{note.note}</p> : null}
-              <div className="row">
+              <div className="note-actions">
                 <button
                   className="btn btn-ghost btn-compact"
                   type="button"
@@ -662,7 +665,7 @@ export function PreviewScreen(props: {
                 >
                   打开
                 </button>
-                <button className="btn btn-ghost btn-compact" type="button" onClick={() => void books.removeNote(note.id).then(() => books.listNotes(props.book.id).then(setNotes))}>
+                <button className="btn btn-ghost btn-compact is-danger" type="button" onClick={() => void books.removeNote(note.id).then(() => books.listNotes(props.book.id).then(setNotes))}>
                   删除
                 </button>
               </div>
@@ -673,44 +676,46 @@ export function PreviewScreen(props: {
 
       {panel === 'type' ? (
         <aside className="drawer">
-          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
-          <h3>阅读版式</h3>
-          <div className="row">
-            {(['s', 'm', 'l'] as const).map((size) => (
-              <button
-                key={size}
-                className={props.settings.fontSize === size ? 'btn' : 'btn btn-ghost'}
-                type="button"
-                onClick={() => props.onSettings({ fontSize: size })}
-              >
-                {size === 's' ? '小' : size === 'm' ? '中' : '大'} {fontSizePx(size)}
-              </button>
-            ))}
+          <DrawerHead title="阅读版式" onClose={() => setPanel(null)} />
+          <div className="type-row">
+            <span className="settings-label">字号</span>
+            <Segmented
+              label="字号"
+              value={props.settings.fontSize}
+              options={(['s', 'm', 'l'] as const).map((size) => [size, `${size === 's' ? '小' : size === 'm' ? '中' : '大'} ${fontSizePx(size)}`] as const)}
+              onChange={(fontSize) => props.onSettings({ fontSize })}
+            />
           </div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button className={props.settings.fontFamily === 'serif' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ fontFamily: 'serif' })}>
-              宋体
-            </button>
-            <button className={props.settings.fontFamily === 'sans' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ fontFamily: 'sans' })}>
-              黑体
-            </button>
+          <div className="type-row">
+            <span className="settings-label">字体</span>
+            <Segmented
+              label="字体"
+              value={props.settings.fontFamily}
+              options={[
+                ['serif', '宋体'],
+                ['sans', '黑体'],
+              ]}
+              onChange={(fontFamily) => props.onSettings({ fontFamily })}
+            />
           </div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button className={props.settings.theme === 'paper' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ theme: 'paper' })}>
-              纸
-            </button>
-            <button className={props.settings.theme === 'sepia' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ theme: 'sepia' })}>
-              护眼
-            </button>
-            <button className={props.settings.theme === 'night' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ theme: 'night' })}>
-              夜
-            </button>
-            <button className={props.settings.theme === 'system' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ theme: 'system' })}>
-              系统
-            </button>
+          <div className="type-row">
+            <span className="settings-label">颜色</span>
+            <Segmented
+              label="颜色"
+              value={props.settings.theme}
+              options={[
+                ['paper', '纸'],
+                ['sepia', '护眼'],
+                ['night', '夜'],
+                ['system', '系统'],
+              ]}
+              onChange={(theme) => props.onSettings({ theme })}
+            />
           </div>
-          <label className="field">
-            行距 {props.settings.lineHeight.toFixed(1)}
+          <label className="type-row">
+            <span className="settings-label">
+              行距 <span className="type-value">{props.settings.lineHeight.toFixed(1)}</span>
+            </span>
             <input
               type="range"
               min={1.4}
@@ -720,8 +725,10 @@ export function PreviewScreen(props: {
               onChange={(e) => props.onSettings({ lineHeight: Number(e.target.value) })}
             />
           </label>
-          <label className="field">
-            页边距 {props.settings.pageMargin}
+          <label className="type-row">
+            <span className="settings-label">
+              页边距 <span className="type-value">{props.settings.pageMargin}</span>
+            </span>
             <input
               type="range"
               min={8}
@@ -731,13 +738,17 @@ export function PreviewScreen(props: {
               onChange={(e) => props.onSettings({ pageMargin: Number(e.target.value) })}
             />
           </label>
-          <div className="row">
-            <button className={props.settings.readMode === 'scroll' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ readMode: 'scroll' })}>
-              滚动
-            </button>
-            <button className={props.settings.readMode === 'page' ? 'btn' : 'btn btn-ghost'} type="button" onClick={() => props.onSettings({ readMode: 'page' })}>
-              翻页
-            </button>
+          <div className="type-row">
+            <span className="settings-label">翻页方式</span>
+            <Segmented
+              label="翻页方式"
+              value={props.settings.readMode}
+              options={[
+                ['scroll', '滚动'],
+                ['page', '翻页'],
+              ]}
+              onChange={(readMode) => props.onSettings({ readMode })}
+            />
           </div>
         </aside>
       ) : null}
@@ -752,6 +763,17 @@ export function PreviewScreen(props: {
       setNoteDraft('')
     } catch { setError('笔记保存失败，请重试。') }
   }
+}
+
+function DrawerHead(props: { title: string; onClose: () => void }) {
+  return (
+    <div className="drawer-head">
+      <h3>{props.title}</h3>
+      <button className="icon-btn" type="button" onClick={props.onClose} aria-label="关闭面板">
+        <Icon name="close" />
+      </button>
+    </div>
+  )
 }
 
 function textSelecting(doc: Document): boolean {

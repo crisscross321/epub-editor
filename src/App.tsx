@@ -640,13 +640,18 @@ export default function App() {
               <button className="btn btn-bubble btn-compact" type="button" onClick={() => setRoute({ name: 'settings' })}>
                 设置
               </button>
+            ) : route.name === 'editor' && doc ? (
+              <span className={saveState === 'error' ? 'save-status is-error' : 'save-status'} role="status">
+                {saveState === 'saved' ? '已保存到本机' : saveState === 'saving' ? '正在保存…' : saveState === 'pending' ? '有修改待保存' : '保存失败'}
+                {saveState === 'error' ? <button type="button" onClick={() => void flushEditor()}>重试保存</button> : null}
+              </span>
             ) : undefined
           }
         />
       )}
       {notice ? (
         <div className={notice.kind === 'ok' ? 'banner banner-ok' : 'banner'} role="status">
-          {notice.text}
+          <span>{notice.text}</span>
           <button type="button" onClick={() => setNotice(null)}>
             关闭
           </button>
@@ -655,7 +660,7 @@ export default function App() {
       {busy ? <div className="busy-overlay" role="status" aria-live="polite">正在保存或加载，请稍候…</div> : null}
       {undo?.kind === 'chapter' && route.name === 'chapters' ? (
         <div className="banner banner-ok" role="status">
-          已删除「{undo.title}」
+          <span>已删除「{undo.title}」</span>
           <button
             type="button"
             onClick={() => {
@@ -941,10 +946,6 @@ export default function App() {
 
       {route.name === 'editor' && doc ? (
         <div inert={busy}>
-        <div className="save-status" role="status">
-          {saveState === 'saved' ? '已保存到本机' : saveState === 'saving' ? '正在保存…' : saveState === 'pending' ? '有修改待保存' : '保存失败，正文仍保留在当前页面'}
-          {saveState === 'error' ? <button type="button" onClick={() => void flushEditor()}>重试保存</button> : null}
-        </div>
         <ErrorBoundary>
           <EditorScreen
             docKey={`${route.bookId}:${route.chapterId}`}

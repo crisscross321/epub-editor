@@ -3,6 +3,7 @@ import { coverHue } from '../../app/progress'
 import { bookProgress } from '../../app/sortBooks'
 import type { ShelfSort, ShelfView } from '../../storage/settings'
 import type { BookRecord } from '../../types/book'
+import { Icon, Segmented } from '../chrome'
 import { LONG_PRESS_MS, nextStarred, toggleSelected } from '../selection'
 
 function SearchIcon() {
@@ -101,20 +102,18 @@ export function BookshelfScreen(props: {
   return (
     <div className={selecting ? 'screen screen-selecting' : 'screen'}>
       {selecting ? (
-        <p className="muted" style={{ margin: '0 0 8px' }}>
-          已选 {picked.size} 本
-        </p>
+        <p className="select-hint">已选 {picked.size} 本 · 点封面增减</p>
       ) : null}
 
       {props.backupCount > 0 ? (
         <div className="banner">
-          {props.backupCount} 本书改过还没导出。卸载应用会丢掉书架，导出才是备份。
+          <span>{props.backupCount} 本书改过还没导出。卸载应用会丢掉书架，导出才是备份。</span>
         </div>
       ) : null}
 
       {props.undoLabel && props.onUndo ? (
         <div className="banner banner-ok">
-          已删除「{props.undoLabel}」
+          <span>已删除「{props.undoLabel}」</span>
           <button type="button" onClick={props.onUndo}>
             撤销
           </button>
@@ -124,25 +123,27 @@ export function BookshelfScreen(props: {
       {props.continueBook && !selecting ? (
         <button className="continue-card" type="button" onClick={props.onContinue}>
           <Cover book={props.continueBook} url={props.covers[props.continueBook.id]} />
-          <div>
+          <div className="continue-main">
             <div className="muted">继续阅读</div>
             <h2>{props.continueBook.title || '未命名'}</h2>
-            <div className="progress-track">
-              <span style={{ width: `${bookProgress(props.continueBook)}%` }} />
+            <div className="continue-progress">
+              <div className="progress-track">
+                <span style={{ width: `${bookProgress(props.continueBook)}%` }} />
+              </div>
+              <span className="muted">{bookProgress(props.continueBook)}%</span>
             </div>
-            <div className="muted">{bookProgress(props.continueBook)}%</div>
           </div>
         </button>
       ) : null}
 
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="action-grid">
         <button className="btn" type="button" onClick={props.onCreate}>
           新建书籍
         </button>
-        <button className="btn btn-ghost" type="button" onClick={props.onImport}>
+        <button className="btn btn-line" type="button" onClick={props.onImport}>
           打开 EPUB
         </button>
-        <button className="btn btn-ghost" type="button" onClick={props.onImportText}>
+        <button className="btn btn-line" type="button" onClick={props.onImportText}>
           导入文稿
         </button>
       </div>
@@ -157,26 +158,25 @@ export function BookshelfScreen(props: {
         />
       </label>
 
-      <div className="row" style={{ margin: '10px 0 16px' }}>
-        {(
-          [
+      <div className="shelf-toolbar">
+        <Segmented
+          label="排序"
+          value={props.sort}
+          options={[
             ['updated', '最近'],
             ['title', '书名'],
             ['author', '作者'],
             ['progress', '进度'],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            className={props.sort === id ? 'btn btn-compact' : 'btn btn-ghost btn-compact'}
-            type="button"
-            onClick={() => props.onSort(id)}
-          >
-            {label}
-          </button>
-        ))}
-        <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onView(props.view === 'grid' ? 'list' : 'grid')}>
-          {props.view === 'grid' ? '列表' : '封面'}
+          ]}
+          onChange={props.onSort}
+        />
+        <button
+          className="icon-btn icon-btn-soft"
+          type="button"
+          aria-label={props.view === 'grid' ? '列表' : '封面'}
+          onClick={() => props.onView(props.view === 'grid' ? 'list' : 'grid')}
+        >
+          <Icon name={props.view === 'grid' ? 'list' : 'grid'} />
         </button>
       </div>
 
@@ -203,40 +203,50 @@ export function BookshelfScreen(props: {
             >
               <span className="shelf-cover-wrap">
                 <Cover book={book} url={props.covers[book.id]} />
+                {book.starred ? <span className="star-badge">收藏</span> : null}
                 {selecting ? <span className={picked.has(book.id) ? 'pick-mark is-on' : 'pick-mark'} /> : null}
               </span>
               <strong>{book.title || '未命名'}</strong>
               <span className="muted">{book.author || '未署名'}</span>
-              {book.starred ? <span className="star">收藏</span> : null}
             </button>
           ))}
         </div>
       ) : (
-        props.books.map((book) => (
-          <article key={book.id} className="book-card">
-            <button type="button" onClick={() => props.onOpen(book.id)} className="book-card-main">
-              <Cover book={book} url={props.covers[book.id]} />
-              <div>
-                <h2>{book.title || '未命名'}</h2>
-                <div className="muted">
-                  {book.author || '未署名'} · {new Date(book.updatedAt).toLocaleString('zh-CN')}
-                  {book.lastExportedAt ? ' · 已导出' : ' · 尚未导出'}
+        <div className="book-list">
+          {props.books.map((book) => (
+            <article key={book.id} className="book-card">
+              <button type="button" onClick={() => props.onOpen(book.id)} className="book-card-main">
+                <span className="shelf-cover-wrap">
+                  <Cover book={book} url={props.covers[book.id]} />
+                </span>
+                <div className="book-card-body">
+                  <h2>
+                    {book.starred ? <span className="star">收藏</span> : null}
+                    {book.title || '未命名'}
+                  </h2>
+                  <div className="muted">{book.author || '未署名'}</div>
+                  <div className="muted">
+                    {new Date(book.updatedAt).toLocaleDateString('zh-CN')} 修改 · {book.lastExportedAt ? '已导出' : '尚未导出'}
+                  </div>
+                  <div className="continue-progress">
+                    <div className="progress-track">
+                      <span style={{ width: `${bookProgress(book)}%` }} />
+                    </div>
+                    <span className="muted">{bookProgress(book)}%</span>
+                  </div>
                 </div>
-                <div className="progress-track">
-                  <span style={{ width: `${bookProgress(book)}%` }} />
-                </div>
+              </button>
+              <div className="book-card-actions">
+                <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onStar([book.id])}>
+                  {book.starred ? '取消收藏' : '收藏'}
+                </button>
+                <button className="btn btn-ghost btn-compact is-danger" type="button" onClick={() => props.onDelete([book.id])}>
+                  删除存档
+                </button>
               </div>
-            </button>
-            <div className="book-card-actions">
-              <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onStar([book.id])}>
-                {book.starred ? '取消收藏' : '收藏'}
-              </button>
-              <button className="btn btn-ghost btn-compact" type="button" onClick={() => props.onDelete([book.id])}>
-                删除存档
-              </button>
-            </div>
-          </article>
-        ))
+            </article>
+          ))}
+        </div>
       )}
 
       {selecting ? (
@@ -252,7 +262,7 @@ export function BookshelfScreen(props: {
             取消
           </button>
           <button
-            className="btn btn-ghost"
+            className="btn btn-line"
             type="button"
             disabled={ids.length === 0}
             onClick={() => props.onStar(ids)}

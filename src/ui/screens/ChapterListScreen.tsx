@@ -1,21 +1,8 @@
 import { useRef, useState } from 'react'
 import { displayChapterName } from '../../epub/headings'
 import type { BookRecord } from '../../types/book'
+import { Icon } from '../chrome'
 import { LONG_PRESS_MS, toggleSelected } from '../selection'
-
-function TrashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M5 7h14M10 7V5h4v2M8 7l1 13h6l1-13"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
 
 function isChrome(target: EventTarget | null): boolean {
   return Boolean((target as HTMLElement | null)?.closest?.('button, input, textarea, a, label'))
@@ -107,6 +94,7 @@ export function ChapterListScreen(props: {
             </div>
             <button className="text-action" type="button" onClick={props.onInfo}>
               书籍信息
+              <Icon name="chevron" size={14} />
             </button>
           </div>
           <div className="book-head-cover">
@@ -124,19 +112,19 @@ export function ChapterListScreen(props: {
       </section>
 
       <section className="book-panel">
-        <div className="row">
+        <div className="action-grid">
           <button className="btn" type="button" onClick={props.onPreview}>
             继续阅读
           </button>
-          <button className="btn btn-ghost" type="button" onClick={props.onExport}>
+          <button className="btn btn-line" type="button" onClick={props.onExport}>
             导出 EPUB
           </button>
-          <button className="btn btn-ghost" type="button" onClick={props.onExportMenu}>
+          <button className="btn btn-line" type="button" onClick={props.onExportMenu}>
             更多导出
           </button>
         </div>
         {selecting ? (
-          <p className="muted">已选 {props.selected.size} 章 · 长按或点选章节</p>
+          <p className="select-hint">已选 {props.selected.size} 章 · 长按或点选章节</p>
         ) : (
           <form
             className="book-replace"
@@ -155,7 +143,7 @@ export function ChapterListScreen(props: {
                 setReplaceHint('')
               }}
             />
-            <span className="muted">替换为</span>
+            <span className="book-replace-arrow" aria-hidden="true">→</span>
             <input
               value={replace}
               placeholder="替换内容"
@@ -165,7 +153,7 @@ export function ChapterListScreen(props: {
                 setReplaceHint('')
               }}
             />
-            <button className="btn btn-ghost btn-compact" type="submit">
+            <button className="btn btn-line btn-compact" type="submit">
               替换
             </button>
           </form>
@@ -219,29 +207,36 @@ export function ChapterListScreen(props: {
                 onChange={(e) => props.onRenameChapter(ch.id, e.target.value)}
               />
             </div>
+            {ch.state === 'pristine' ? <div className="chapter-note">原样保留 · 打开编辑后将简化排版</div> : null}
             {selecting ? null : (
               <div className="chapter-actions">
-                <button className="btn btn-ghost" type="button" onClick={() => props.onPreviewChapter(ch.id)}>
+                <button className="btn btn-line" type="button" onClick={() => props.onPreviewChapter(ch.id)}>
                   预览
                 </button>
-                <button className="btn btn-ghost" type="button" onClick={() => props.onOpenChapter(ch.id)}>
+                <button className="btn btn-line" type="button" onClick={() => props.onOpenChapter(ch.id)}>
                   编辑
                 </button>
-                <button className="icon-btn" type="button" aria-label="上移" onClick={() => props.onMove(ch.id, -1)}>
-                  ↑
+                <span className="chapter-actions-gap" />
+                <button className="icon-btn" type="button" aria-label="上移" disabled={index === 0} onClick={() => props.onMove(ch.id, -1)}>
+                  <Icon name="up" size={18} />
                 </button>
-                <button className="icon-btn" type="button" aria-label="下移" onClick={() => props.onMove(ch.id, 1)}>
-                  ↓
+                <button
+                  className="icon-btn"
+                  type="button"
+                  aria-label="下移"
+                  disabled={index === chapters.length - 1}
+                  onClick={() => props.onMove(ch.id, 1)}
+                >
+                  <Icon name="down" size={18} />
                 </button>
-                <button className="btn btn-ghost" type="button" onClick={() => props.onInsert(ch.id)}>
-                  新增
+                <button className="icon-btn" type="button" aria-label="在后面新增一章" onClick={() => props.onInsert(ch.id)}>
+                  <Icon name="plus" size={18} />
                 </button>
                 <button className="icon-btn icon-danger" type="button" aria-label="删除" onClick={() => props.onDelete(ch.id)}>
-                  <TrashIcon />
+                  <Icon name="trash" size={18} />
                 </button>
               </div>
             )}
-            {ch.state === 'pristine' ? <div className="muted">尚未编辑 · 打开正文后将简化排版</div> : null}
           </article>
         ))}
       </section>
@@ -251,7 +246,7 @@ export function ChapterListScreen(props: {
           <button className="btn btn-ghost" type="button" onClick={exitSelect}>
             取消
           </button>
-          <button className="btn btn-ghost" type="button" onClick={props.onMerge}>
+          <button className="btn btn-line" type="button" onClick={props.onMerge}>
             合并所选
           </button>
           <button className="btn" type="button" onClick={props.onMoveTo}>
