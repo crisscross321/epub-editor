@@ -5,7 +5,7 @@ import { editorBackRoute, neighborChapterIds, previewBackTarget, type Route } fr
 import { needsBackupReminder } from './app/progress'
 import { filterBooks, sortBooks } from './app/sortBooks'
 import { toArrayBuffer } from './epub/bytes'
-import { exportChapterHeading, wouldSplitByH1 } from './epub/headings'
+import { wouldSplitByH1 } from './epub/headings'
 import { lossSummary } from './epub/loss'
 import { chaptersToMarkdown, chaptersToPlain } from './epub/plain'
 import {
@@ -54,6 +54,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [listFocus, setListFocus] = useState<string | undefined>()
   const [undo, setUndo] = useState<
     | { kind: 'books'; ids: string[]; title: string }
     | { kind: 'chapter'; dump: ChapterDump; title: string }
@@ -133,6 +134,11 @@ export default function App() {
   bookRef.current = book
   docRef.current = doc
   confirmRef.current = confirm
+
+  useEffect(() => {
+    if (route.name === 'editor') setListFocus(route.chapterId)
+    else if (route.name === 'preview' || route.name === 'shelf') setListFocus(undefined)
+  }, [route])
 
   const goShelf = async () => {
     const current = bookRef.current
@@ -572,10 +578,7 @@ export default function App() {
         selected.size === 1 && selectedId
           ? [
               {
-                title: exportChapterHeading(
-                  [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).findIndex((ch) => ch.id === selectedId),
-                  book.chapters.find((ch) => ch.id === selectedId)?.title || '',
-                ),
+                title: books.chapterHeadingIn(book, selectedId),
                 body: await books.chapterPlain(book.id, book.chapters.find((ch) => ch.id === selectedId)!),
               },
             ]
@@ -609,17 +612,13 @@ export default function App() {
     route.name === 'editor' && book
       ? [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).find((c) => c.id === route.chapterId)
       : undefined
-  const editorIndex =
-    route.name === 'editor' && book
-      ? [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex).findIndex((c) => c.id === route.chapterId)
-      : -1
   const neighbors =
     route.name === 'editor' && book ? neighborChapterIds(book.chapters, route.chapterId) : {}
   const title =
     route.name === 'chapters'
       ? book?.title || '未命名'
-      : route.name === 'editor' && editorChapter && editorIndex >= 0
-        ? exportChapterHeading(editorIndex, editorChapter.title)
+      : route.name === 'editor' && book && editorChapter
+        ? books.chapterHeadingIn(book, editorChapter.id)
         : route.name === 'settings'
           ? '设置'
           : route.name === 'info'
@@ -757,9 +756,11 @@ export default function App() {
 
       {route.name === 'chapters' && book ? (
         <ChapterListScreen
+          key={book.id}
           book={book}
           coverUrl={cover}
           selected={selected}
+          focusChapterId={listFocus ?? book.readChapterId}
           onToggleSelect={(id) => {
             const next = new Set(selected)
             if (next.has(id)) next.delete(id)
@@ -778,6 +779,10 @@ export default function App() {
           onOpenChapter={(id) => void openChapter(id)}
           onPreviewChapter={(id) => setRoute({ name: 'preview', bookId: book.id, chapterId: id })}
           onRenameChapter={(id, title) => void books.renameChapter(book.id, id, title).then(setBook).catch(fail)}
+          onSetKind={(id, kind) => void books.setChapterKind(book.id, id, kind).then(setBook).catch(fail)}
+          onStartPart={(id) => void books.startPart(book.id, id).then((result) => setBook(result.book)).catch(fail)}
+          onRenamePart={(partId, title) => void books.renamePart(book.id, partId, title).then(setBook).catch(fail)}
+          onDissolvePart={(partId) => void books.dissolvePart(book.id, partId).then(setBook).catch(fail)}
           onInsert={(id) => void books.insertChapter(book.id, id).then(setBook).catch(fail)}
           onDelete={(id) =>
             setConfirm({
@@ -838,7 +843,7 @@ export default function App() {
               setNotice({ kind: 'err', text: '请先勾选要移动的一章。' })
               return
             }
-            const n = Number(window.prompt('移到第几章？', '1'))
+            const n = Number(window.prompt('移到第几个位置？（按列表从上往下数，包括不编号的条目）', '1'))
             if (!Number.isFinite(n)) return
             void books.moveChapterTo(book.id, id, n - 1).then(setBook).catch(fail)
           }}

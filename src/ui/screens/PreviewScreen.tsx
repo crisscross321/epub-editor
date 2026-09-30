@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Mouse
 import * as books from '../../app/bookService'
 import { readingPercent } from '../../app/progress'
 import { countChars, readingMinutes, textFromHtml } from '../../content/text'
-import { exportChapterHeading } from '../../epub/headings'
+import { bookOutline } from '../../epub/parts'
 import { shouldRenderOuterTitle } from '../../epub/plain'
 import { sanitizeHtml } from '../../epub/sanitize'
 import { outlineFromXhtml } from '../../epub/toc'
@@ -79,13 +79,23 @@ export function PreviewScreen(props: {
 }) {
   const bookChaptersRef = useRef(props.book.chapters)
   bookChaptersRef.current = props.book.chapters
+  const bookRef = useRef(props.book)
+  bookRef.current = props.book
   const chapterListKey = props.book.chapters
-    .map((ch) => `${ch.spineIndex}:${ch.id}:${ch.title}:${ch.state}`)
+    .map((ch) => `${ch.spineIndex}:${ch.id}:${ch.title}:${ch.state}:${ch.kind ?? ''}:${ch.partId ?? ''}`)
     .join('|')
+  const outlineKey = [
+    chapterListKey,
+    (props.book.parts ?? []).map((part) => `${part.id}:${part.title}`).join('|'),
+    props.book.partWord ?? '',
+    props.book.chapterNumbering ?? '',
+  ].join('#')
   const chapters = useMemo(
     () => [...bookChaptersRef.current].sort((a, b) => a.spineIndex - b.spineIndex),
     [chapterListKey],
   )
+  const outline = useMemo(() => bookOutline(bookRef.current), [outlineKey])
+  const headingOf = (id: string | undefined) => (id ? (outline.headings.get(id) ?? '') : '')
   const start = Math.max(
     0,
     chapters.findIndex((ch) => ch.id === (props.startChapterId || props.book.readChapterId)),
@@ -138,6 +148,14 @@ export function PreviewScreen(props: {
   queryRef.current = query
 
   const win = paged ? { from: index, to: index } : hyd
+  const chapterIndexById = useMemo(() => new Map(chapters.map((ch, i) => [ch.id, i])), [chapters])
+  const [tocOpen, setTocOpen] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (panel !== 'toc') return
+    const partId = chapter ? outline.groupOf.get(chapter.id)?.part?.id : undefined
+    setTocOpen(new Set(partId ? [partId] : []))
+    // Reset only when the drawer opens; reading on must not refold it.
+  }, [panel])
 
   const css = readerBodyCss(props.settings, chapter?.state === 'simplified')
   const streamCss = readerBodyCss(props.settings, chapter?.state === 'simplified', '.preview-chapter')
@@ -185,12 +203,12 @@ export function PreviewScreen(props: {
     let cancelled = false
     setError('')
     void Promise.all(
-      slice.map(async (ch, offsetInSlice) => {
-        const i = from + offsetInSlice
-        const result = await books.getChapterPreview(bookId, ch)
+      slice.map(async (ch) => {
+        const heading = outline.headings.get(ch.id) ?? ''
+        const result = await books.getChapterPreview(bookId, ch, heading)
         return {
           id: ch.id,
-          body: chapterPreviewBody(result.html, exportChapterHeading(i, ch.title), q),
+          body: chapterPreviewBody(result.html, heading, q),
           warning: result.warning,
         }
       }),
@@ -212,7 +230,7 @@ export function PreviewScreen(props: {
       if (!cancelled) setError('章节加载失败，请重试。已保存的书稿不受影响。')
     })
     return () => { cancelled = true }
-  }, [chapters, paged, props.book.id, query, win.from, win.to, retry])
+  }, [chapters, outline, paged, props.book.id, query, win.from, win.to, retry])
 
   useEffect(() => {
     let cancelled = false
@@ -531,7 +549,7 @@ export function PreviewScreen(props: {
           </button>
           <span className="muted">
             {paged ? `${page + 1} / ${pages} · ` : ''}
-            {exportChapterHeading(index, chapter.title)} · {percent}% · 约 {remaining} 分钟
+            {headingOf(chapter.id)} · {percent}% · 约 {remaining} 分钟
           </span>
           <button
             className="btn btn-ghost btn-compact"
@@ -567,27 +585,57 @@ export function PreviewScreen(props: {
       {panel === 'toc' ? (
         <aside className="drawer">
           <DrawerHead title="目录" onClose={() => setPanel(null)} />
-          {chapters.map((ch, i) => {
-            const items = outlineFromXhtml(i === index ? bodyHtml : '')
+          {outline.groups.map((group) => {
+            const items = group.chapters.map((ch) => {
+              const i = chapterIndexById.get(ch.id) ?? 0
+              const subs = outlineFromXhtml(i === index ? bodyHtml : '')
+              return (
+                <div key={ch.id}>
+                  <button
+                    className={i === index ? 'drawer-item is-on' : 'drawer-item'}
+                    type="button"
+                    onClick={() => {
+                      jumpTo(i)
+                      setPanel(null)
+                    }}
+                  >
+                    {headingOf(ch.id)}
+                  </button>
+                  {i === index
+                    ? subs.map((h) => (
+                        <div key={h.id} className="drawer-sub">
+                          {h.title}
+                        </div>
+                      ))
+                    : null}
+                </div>
+              )
+            })
+            if (!group.part) return <div key="ungrouped">{items}</div>
+            if (items.length === 0) return null
+            const partId = group.part.id
+            const open = tocOpen.has(partId)
             return (
-              <div key={ch.id}>
+              <div key={partId} className="drawer-part">
                 <button
-                  className={i === index ? 'drawer-item is-on' : 'drawer-item'}
+                  className="drawer-part-head"
                   type="button"
-                  onClick={() => {
-                    jumpTo(i)
-                    setPanel(null)
-                  }}
+                  aria-expanded={open}
+                  onClick={() =>
+                    setTocOpen((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(partId)) next.delete(partId)
+                      else next.add(partId)
+                      return next
+                    })
+                  }
                 >
-                  {exportChapterHeading(i, ch.title)}
+                  <span className={open ? 'part-chevron is-open' : 'part-chevron'}>
+                    <Icon name="chevron" size={14} />
+                  </span>
+                  {group.heading}
                 </button>
-                {i === index
-                  ? items.map((h) => (
-                      <div key={h.id} className="drawer-sub">
-                        {h.title}
-                      </div>
-                    ))
-                  : null}
+                {open ? items : null}
               </div>
             )
           })}
@@ -641,7 +689,7 @@ export function PreviewScreen(props: {
           <button
             className="btn btn-line btn-block"
             type="button"
-            onClick={() => void addNote('bookmark', exportChapterHeading(index, chapter.title))}
+            onClick={() => void addNote('bookmark', headingOf(chapter.id))}
           >
             在本章加书签
           </button>

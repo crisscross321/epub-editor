@@ -1,7 +1,7 @@
 import type { BookRecord, PackInput, TiptapDoc, TiptapNode } from '../types/book'
 import { imageCss, type ImageAlign } from '../images/layout'
 import { containerXml, zipEpub } from './fixtures'
-import { exportChapterHeading } from './headings'
+import { bookOutline } from './parts'
 import { dirname, joinPath } from './paths'
 import { nestedNavHtml, outlineFromXhtml } from './toc'
 import { escapeXml } from './xml'
@@ -136,7 +136,8 @@ export async function packEpub(input: PackInput): Promise<Uint8Array> {
     `    <item id="nav" href="${escapeXml(relFrom(opfDir, navHref))}" media-type="application/xhtml+xml" properties="nav"/>`,
   ]
   const spineLines: string[] = []
-  const navLis: string[] = []
+  const navLiById = new Map<string, string>()
+  const outline = bookOutline(input.book)
 
   if (input.cover) {
     const coverHref = joinPath(opfDir, `cover.${input.cover.ext}`)
@@ -146,7 +147,7 @@ export async function packEpub(input: PackInput): Promise<Uint8Array> {
     )
   }
 
-  for (const chapter of [...input.book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)) {
+  for (const chapter of outline.chapters) {
     const simplified = input.simplified.get(chapter.id)
     if (chapter.state === 'simplified' && simplified) {
       files.set(chapter.href, simplified.xhtml)
@@ -167,14 +168,24 @@ export async function packEpub(input: PackInput): Promise<Uint8Array> {
         ? simplified.xhtml
         : decodeEntry(files.get(chapter.href))
     const headings = tocSource ? outlineFromXhtml(tocSource) : []
-    navLis.push(
+    navLiById.set(
+      chapter.id,
       nestedNavHtml(
         relFrom(dirname(navHref), chapter.href),
-        exportChapterHeading(chapter.spineIndex, chapter.title),
+        outline.headings.get(chapter.id) ?? '',
         headings,
         escapeXml,
       ),
     )
+  }
+
+  const navLis: string[] = []
+  for (const group of outline.groups) {
+    const items = group.chapters.map((ch) => navLiById.get(ch.id) ?? '')
+    if (!group.part) navLis.push(...items)
+    else if (items.length) {
+      navLis.push(`      <li><span>${escapeXml(group.heading)}</span><ol>\n${items.join('\n')}\n      </ol></li>`)
+    }
   }
 
   const opf = `<?xml version="1.0" encoding="UTF-8"?>

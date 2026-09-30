@@ -1,4 +1,6 @@
-import type { BookRecord } from '../../types/book'
+import { PART_WORDS, partWordOf } from '../../epub/parts'
+import type { BookRecord, ChapterNumbering, PartWord } from '../../types/book'
+import { Segmented } from '../chrome'
 
 export function BookInfoScreen(props: {
   book: BookRecord
@@ -6,6 +8,7 @@ export function BookInfoScreen(props: {
   onChange: (patch: Partial<BookRecord>) => void
   onCover: () => void
 }) {
+  const word = partWordOf(props.book)
   return (
     <div className="screen">
       <div className="field">
@@ -48,6 +51,28 @@ export function BookInfoScreen(props: {
                 .filter(Boolean),
             })
           }
+        />
+      </div>
+      <div className="field">
+        <label>分册叫法</label>
+        <Segmented<PartWord>
+          label="分册叫法"
+          value={word}
+          options={PART_WORDS.map((w) => [w, w] as const)}
+          onChange={(partWord) => props.onChange({ partWord })}
+        />
+        <p className="muted field-hint">在章节卡片上点编号，可以「从这里开始新的一{word}」。</p>
+      </div>
+      <div className="field">
+        <label>章节编号</label>
+        <Segmented<ChapterNumbering>
+          label="章节编号"
+          value={props.book.chapterNumbering ?? 'continuous'}
+          options={[
+            ['continuous', '全书连续'],
+            ['perPart', `每${word}从 1 开始`],
+          ]}
+          onChange={(chapterNumbering) => props.onChange({ chapterNumbering })}
         />
       </div>
       {props.book.sourceName ? (

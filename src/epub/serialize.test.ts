@@ -151,9 +151,9 @@ describe('packEpub', () => {
     const spineOrder = [...opf.matchAll(/idref="([^"]+)"/g)].map((m) => m[1])
     expect(spineOrder).toEqual(['ch3', 'ch1', 'newch'])
     const nav = await zip.file('OEBPS/nav.xhtml')!.async('string')
-    expect(nav.indexOf('第三章')).toBeLessThan(nav.indexOf('第一章'))
+    expect(nav.indexOf('text/ch3.xhtml')).toBeLessThan(nav.indexOf('text/ch1.xhtml'))
     expect(nav).toContain('新章')
-    expect(nav).not.toContain('第二章')
+    expect(nav).not.toContain('text/ch2.xhtml')
   })
 
   it('writes heading ids and nested nav for h2 and h3', async () => {

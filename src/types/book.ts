@@ -1,4 +1,7 @@
 export type ChapterState = 'pristine' | 'simplified'
+export type ChapterKind = 'chapter' | 'unnumbered'
+export type PartWord = '册' | '卷' | '部' | '部分' | '篇'
+export type ChapterNumbering = 'continuous' | 'perPart'
 
 export interface ChapterIndex {
   id: string
@@ -6,6 +9,13 @@ export interface ChapterIndex {
   title: string
   spineIndex: number
   state: ChapterState
+  kind?: ChapterKind
+  partId?: string
+}
+
+export interface BookPart {
+  id: string
+  title: string
 }
 
 export interface BookRecord {
@@ -19,6 +29,9 @@ export interface BookRecord {
   sourceName?: string
   opfHref: string
   chapters: ChapterIndex[]
+  parts?: BookPart[]
+  chapterNumbering?: ChapterNumbering
+  partWord?: PartWord
   description?: string
   publisher?: string
   series?: string
@@ -66,6 +79,9 @@ export interface ParsedEpub {
   coverHref?: string
   coverId?: string
   chapters: ChapterIndex[]
+  parts?: BookPart[]
+  chapterNumbering?: ChapterNumbering
+  partWord?: PartWord
   entries: Map<string, Uint8Array>
   navHref?: string
   opfHref: string

@@ -39,6 +39,7 @@ export async function fixtureEpub3(options?: {
   skipOpf?: boolean
   emptySpine?: boolean
   linearNoExtra?: boolean
+  navLis?: string
 }): Promise<Uint8Array> {
   const title = options?.title ?? '测试书'
   const author = options?.author ?? '作者甲'
@@ -95,9 +96,9 @@ ${spine}
 </package>`
     files.push({ path: 'OEBPS/content.opf', data: opf })
 
-    const navLis = chapters
-      .map((ch) => `      <li><a href="text/${ch.id}.xhtml">${escapeXml(ch.title)}</a></li>`)
-      .join('\n')
+    const navLis =
+      options?.navLis ??
+      chapters.map((ch) => `      <li><a href="text/${ch.id}.xhtml">${escapeXml(ch.title)}</a></li>`).join('\n')
     files.push({
       path: 'OEBPS/nav.xhtml',
       data: xhtmlChapter(

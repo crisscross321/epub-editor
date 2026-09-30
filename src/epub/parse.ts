@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import type { ChapterIndex, ParsedEpub } from '../types/book'
 import { EpubError } from './errors'
 import { dirname, joinPath, normalizeZipPath } from './paths'
+import { structureChapters, type NavGroupHint } from './parts'
 import { parseHtml, elementsByLocalName, firstByLocalName, parseXml, textOf } from './xml'
 
 function firstHeading(xhtml: string): string {
@@ -12,6 +13,60 @@ function firstHeading(xhtml: string): string {
     if (text) return text
   }
   return ''
+}
+
+function localName(el: Element): string {
+  return (el.localName || el.tagName).toLowerCase().split(':').pop() ?? ''
+}
+
+function childElements(el: Element, name: string): Element[] {
+  return Array.from(el.childNodes).filter(
+    (node): node is Element => node.nodeType === 1 && localName(node as Element) === name,
+  )
+}
+
+function navGroupsFromNav(navDoc: Document, navDir: string): NavGroupHint[] {
+  const navs = elementsByLocalName(navDoc, 'nav')
+  const toc = navs.find((nav) => (nav.getAttribute('epub:type') ?? '').split(/\s+/).includes('toc')) ?? navs[0]
+  const list = toc ? childElements(toc, 'ol')[0] : undefined
+  if (!list) return []
+  const groups: NavGroupHint[] = []
+  for (const li of childElements(list, 'li')) {
+    const sub = childElements(li, 'ol')[0]
+    if (!sub) continue
+    const label = childElements(li, 'a')[0] ?? childElements(li, 'span')[0]
+    const own = label && localName(label) === 'a' ? label.getAttribute('href') : null
+    groups.push({
+      title: textOf(label),
+      ownHref: own ? joinPath(navDir, own) : undefined,
+      hrefs: elementsByLocalName(sub, 'a')
+        .map((a) => a.getAttribute('href'))
+        .filter((href): href is string => Boolean(href))
+        .map((href) => joinPath(navDir, href)),
+    })
+  }
+  return groups
+}
+
+function navGroupsFromNcx(ncxDoc: Document, ncxDir: string): NavGroupHint[] {
+  const map = firstByLocalName(ncxDoc, 'navMap')
+  if (!map) return []
+  const groups: NavGroupHint[] = []
+  for (const point of childElements(map, 'navpoint')) {
+    const children = childElements(point, 'navpoint')
+    if (children.length === 0) continue
+    const own = childElements(point, 'content')[0]?.getAttribute('src')
+    groups.push({
+      title: textOf(firstByLocalName(childElements(point, 'navlabel')[0] ?? point, 'text')),
+      ownHref: own ? joinPath(ncxDir, own) : undefined,
+      hrefs: children
+        .flatMap((child) => elementsByLocalName(child, 'content'))
+        .map((content) => content.getAttribute('src'))
+        .filter((src): src is string => Boolean(src))
+        .map((src) => joinPath(ncxDir, src)),
+    })
+  }
+  return groups
 }
 
 function zipEntry(zip: JSZip, path: string) {
@@ -102,6 +157,7 @@ export async function parseEpub(buf: ArrayBuffer): Promise<ParsedEpub> {
   const navItem = [...manifest.values()].find((item) => item.properties.split(/\s+/).includes('nav'))
   const navHref = navItem?.href
   const titleByHref = new Map<string, string>()
+  let navGroups: NavGroupHint[] = []
 
   if (navHref) {
     const navFile = zipEntry(zip, navHref)
@@ -109,10 +165,12 @@ export async function parseEpub(buf: ArrayBuffer): Promise<ParsedEpub> {
       try {
         const navDoc = parseXml(await navFile.async('text'))
         const navDir = dirname(navHref)
+        navGroups = navGroupsFromNav(navDoc, navDir)
         for (const a of elementsByLocalName(navDoc, 'a')) {
           const href = a.getAttribute('href')
           if (!href) continue
-          titleByHref.set(joinPath(navDir, href), textOf(a))
+          const key = joinPath(navDir, href)
+          if (!titleByHref.has(key)) titleByHref.set(key, textOf(a))
         }
       } catch {
         /* nav optional */
@@ -127,6 +185,7 @@ export async function parseEpub(buf: ArrayBuffer): Promise<ParsedEpub> {
       try {
         const ncxDoc = parseXml(await ncxFile.async('text'))
         const ncxDir = dirname(ncxItem[1].href)
+        if (navGroups.length === 0) navGroups = navGroupsFromNcx(ncxDoc, ncxDir)
         const points = elementsByLocalName(ncxDoc, 'navPoint')
         for (const point of points) {
           const label = firstByLocalName(point, 'text')
@@ -181,6 +240,8 @@ export async function parseEpub(buf: ArrayBuffer): Promise<ParsedEpub> {
   }
 
   const entries = await readEntries(zip)
+  let partSeq = 0
+  const structured = structureChapters(chapters, navGroups, () => `part-${++partSeq}`)
 
   return {
     title,
@@ -188,7 +249,10 @@ export async function parseEpub(buf: ArrayBuffer): Promise<ParsedEpub> {
     language,
     coverHref,
     coverId,
-    chapters,
+    chapters: structured.chapters,
+    ...(structured.parts.length ? { parts: structured.parts } : {}),
+    ...(structured.partWord ? { partWord: structured.partWord } : {}),
+    ...(structured.chapterNumbering ? { chapterNumbering: structured.chapterNumbering } : {}),
     entries,
     navHref,
     opfHref,

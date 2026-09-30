@@ -1000,6 +1000,191 @@ textarea {
   color: var(--cinnabar);
 }
 
+.chapter-index-btn {
+  min-height: 32px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border-radius: 6px;
+}
+
+.chapter-index-btn:active,
+.chapter-index-btn[aria-expanded='true'] {
+  background: var(--fill);
+  color: var(--ink);
+}
+
+.chapter-index.is-unnumbered {
+  font-weight: 500;
+  font-style: italic;
+}
+
+.chapter-menu {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--fill);
+}
+
+.chapter-menu .seg {
+  background: var(--paper);
+}
+
+.chapter-menu-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.chapter-menu .btn {
+  justify-self: start;
+}
+
+/* ---------- Parts (册) ---------- */
+
+.book-panel-chapters.has-parts {
+  --part-switch-h: 48px;
+}
+
+.part-switch {
+  position: sticky;
+  top: calc(var(--bar-h) + var(--safe-top));
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--part-switch-h);
+  margin: 0 0 8px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+}
+
+.part-switch .text-action {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.part-switch-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.part-switch-list::-webkit-scrollbar {
+  display: none;
+}
+
+.part-switch-list button {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--fill);
+  font-size: 14px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.part-switch-list button.is-on {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+
+.part-block {
+  margin-bottom: 4px;
+}
+
+.part-head {
+  position: sticky;
+  top: calc(var(--bar-h) + var(--safe-top) + var(--part-switch-h, 0px));
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  scroll-margin-top: calc(var(--bar-h) + var(--safe-top) + var(--part-switch-h, 0px));
+}
+
+.part-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 0;
+  text-align: left;
+}
+
+.part-chevron {
+  display: inline-flex;
+  color: var(--ink-soft);
+  transition: transform 0.15s ease;
+}
+
+.part-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.part-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.part-meta {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.part-edit {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.part-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 12px;
+}
+
+.part-editor input {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--fill);
+  font-size: 15px;
+}
+
+.part-empty {
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
 .chapter-name-bar {
   position: sticky;
   top: calc(var(--bar-h) + var(--safe-top));
@@ -1014,6 +1199,11 @@ textarea {
 
 .chapter-name-bar label {
   flex-shrink: 0;
+}
+
+.field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
 }
 
 /* ---------- Forms ---------- */
@@ -1594,6 +1784,23 @@ textarea {
   padding: 6px 0 6px 16px;
   font-size: 13px;
   color: var(--ink-soft);
+}
+
+.drawer-part-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  font-family: var(--display);
+  font-weight: 600;
+}
+
+.drawer-part .drawer-item {
+  padding-left: 20px;
 }
 
 .drawer-search {

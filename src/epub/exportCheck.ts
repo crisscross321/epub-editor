@@ -9,6 +9,7 @@ export function checkExport(input: {
   language: string
   hasCover: boolean
   chapters: { id: string; title: string; empty: boolean }[]
+  emptyParts?: string[]
   imageBytes: number[]
 }): ExportIssue[] {
   const issues: ExportIssue[] = []
@@ -32,6 +33,9 @@ export function checkExport(input: {
         message: `「${chapter.title || '未命名章节'}」是空的`,
       })
     }
+  }
+  for (const [i, heading] of (input.emptyParts ?? []).entries()) {
+    issues.push({ id: `empty-part-${i}`, message: `「${heading}」里还没有章节，导出目录时会跳过` })
   }
   const large = input.imageBytes.filter((n) => n > 2_000_000).length
   if (large) {

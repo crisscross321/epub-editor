@@ -1,9 +1,25 @@
-import type { TiptapDoc, TiptapNode } from '../types/book'
+import { inferKind, parseChapterTitle, parsePartTitle, resolveOrdinals } from '../epub/parts'
+import type { ChapterKind, ChapterNumbering, PartWord, TiptapDoc, TiptapNode } from '../types/book'
 
 export interface ImportedChapter {
   title: string
   doc: TiptapDoc
+  kind?: ChapterKind
+  part?: number
 }
+
+export interface ImportedText {
+  chapters: ImportedChapter[]
+  parts: { title: string }[]
+  partWord?: PartWord
+  chapterNumbering?: ChapterNumbering
+}
+
+const NUM = '[0-9０-９零〇一二两三四五六七八九十百千]+'
+const HEADING_LINE = new RegExp(
+  `^(第[^\\n]{0,12}章[^\\n]*|(?:第\\s*${NUM}\\s*(?:部分|[册卷部篇])|[卷册]\\s*${NUM}|序章|序幕|楔子|引子|序言|前言|尾声|终章|后记|番外|间章)(?=$|[\\s:：、.．·\\-—])[^\\n]{0,40})$`,
+  'gm',
+)
 
 function paragraph(text: string): TiptapNode {
   return text
@@ -59,13 +75,19 @@ function splitByHeading(raw: string, pattern: RegExp): { title: string; body: st
   return chapters.filter((ch) => ch.title || ch.body)
 }
 
-export function splitImportedText(raw: string, filename = ''): ImportedChapter[] {
+function mostCommon<T>(values: T[]): T | undefined {
+  const counts = new Map<T, number>()
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+}
+
+export function structureImportedText(raw: string, filename = ''): ImportedText {
   const text = raw.replace(/^\uFEFF/, '').trim()
-  if (!text) return [{ title: '', doc: textToDoc('') }]
+  if (!text) return { chapters: [{ title: '', doc: textToDoc('') }], parts: [] }
 
   const mdName = /\.md$/i.test(filename)
   const mdChapters = splitByHeading(text, /^#{1,2}\s+(.+)$/gm)
-  const ordinalChapters = splitByHeading(text, /^(第[^\n]{0,12}章[^\n]*)$/gm)
+  const ordinalChapters = splitByHeading(text, HEADING_LINE)
 
   const chunks =
     mdName || (mdChapters.length > 1 && mdChapters.length >= ordinalChapters.length)
@@ -74,8 +96,51 @@ export function splitImportedText(raw: string, filename = ''): ImportedChapter[]
         ? ordinalChapters
         : [{ title: '', body: text }]
 
-  return chunks.map((chunk) => ({
-    title: chunk.title.replace(/^#+\s*/, '').trim(),
-    doc: textToDoc(chunk.body),
-  }))
+  const parts: { title: string }[] = []
+  const words: PartWord[] = []
+  let current: { index: number; number: number } | undefined
+  const out: ImportedChapter[] = []
+  const openPart = (title: string, number: number) => {
+    parts.push({ title })
+    current = { index: parts.length - 1, number }
+  }
+
+  chunks.forEach((chunk, i) => {
+    const title = chunk.title.replace(/^#+\s*/, '').trim()
+    const part = parsePartTitle(title)
+    if (part) {
+      words.push(part.word)
+      if (!parseChapterTitle(part.rest)) {
+        openPart(part.rest, part.number)
+        if (chunk.body.trim()) out.push({ title: '引言', doc: textToDoc(chunk.body), kind: 'unnumbered', part: current!.index })
+        return
+      }
+      if (!current || current.number !== part.number) openPart('', part.number)
+      out.push({ title: part.rest, doc: textToDoc(chunk.body), part: current!.index })
+      return
+    }
+    const preface = !title && i === 0 && chunks.length > 1
+    out.push({
+      title: preface ? '前言' : title,
+      doc: textToDoc(chunk.body),
+      kind: preface ? 'unnumbered' : inferKind(title),
+      part: current?.index,
+    })
+  })
+  if (out.length === 0) out.push({ title: '', doc: textToDoc(''), part: current?.index })
+
+  const resolved = resolveOrdinals(
+    out.map((ch) => ({ ...ch, partId: ch.part === undefined ? undefined : String(ch.part) })),
+    parts.length > 0,
+  )
+  return {
+    chapters: resolved.items.map(({ partId: _partId, ...ch }) => ch),
+    parts,
+    partWord: mostCommon(words),
+    chapterNumbering: parts.length ? resolved.numbering : undefined,
+  }
+}
+
+export function splitImportedText(raw: string, filename = ''): ImportedChapter[] {
+  return structureImportedText(raw, filename).chapters
 }

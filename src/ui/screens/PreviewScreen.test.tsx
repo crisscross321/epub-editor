@@ -212,3 +212,40 @@ describe('PreviewScreen chapter navigation', () => {
     expect(container.querySelector('[data-chapter-id="ch1"] p')).toBe(paragraph)
   })
 })
+
+describe('PreviewScreen with parts', () => {
+  const partBook: BookRecord = {
+    ...book,
+    parts: [
+      { id: 'p1', title: '风起' },
+      { id: 'p2', title: '' },
+    ],
+    chapters: [
+      { id: 'pro', href: 'p.xhtml', title: '楔子', spineIndex: 0, state: 'simplified', kind: 'unnumbered' },
+      { id: 'ch1', href: 'a.xhtml', title: '茶峒', spineIndex: 1, state: 'simplified', partId: 'p1' },
+      { id: 'ch2', href: 'b.xhtml', title: '白塔', spineIndex: 2, state: 'simplified', partId: 'p2' },
+    ],
+  }
+
+  it('labels chapters without counting unnumbered ones', async () => {
+    const { container } = render(screen({ book: partBook, startChapterId: 'pro' }))
+    await flush()
+    expect(heading(container)).toContain('楔子')
+    expect(heading(container)).not.toContain('第 1 章')
+    const other = render(screen({ book: partBook, startChapterId: 'ch2' }))
+    await flush()
+    expect(heading(other.container)).toContain('第 2 章 白塔')
+  })
+
+  it('groups the table of contents and opens only the current part', async () => {
+    const { container } = render(screen({ book: partBook, startChapterId: 'ch2' }))
+    await flush()
+    act(() => button(container, '目录')!.click())
+    const heads = [...container.querySelectorAll('.drawer-part-head')]
+    expect(heads.map((el) => el.textContent)).toEqual(['第一册 风起', '第二册'])
+    const items = () => [...container.querySelectorAll('.drawer .drawer-item')].map((el) => el.textContent)
+    expect(items()).toEqual(['楔子', '第 2 章 白塔'])
+    act(() => (heads[0] as HTMLElement).click())
+    expect(items()).toEqual(['楔子', '第 1 章 茶峒', '第 2 章 白塔'])
+  })
+})
