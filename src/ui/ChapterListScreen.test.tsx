@@ -110,6 +110,68 @@ describe('ChapterListScreen multi-select', () => {
     expect(check).toBeTruthy()
     expect(check?.className).toContain('chapter-check')
   })
+
+  it('enters select mode when the chapter title is long-pressed, without selecting its text', () => {
+    const onToggleSelect = vi.fn()
+    const container = render(screen({ onToggleSelect }))
+    const title = container.querySelector('#chapter-ch1 .chapter-name')
+    expect(title).toBeTruthy()
+    expect(container.querySelector('#chapter-ch1 input[aria-label="章节名"]')).toBeNull()
+
+    const selection = new Event('selectstart', { bubbles: true, cancelable: true })
+    title!.dispatchEvent(selection)
+    expect(selection.defaultPrevented).toBe(true)
+
+    act(() => {
+      title!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+      vi.advanceTimersByTime(LONG_PRESS_MS)
+      title!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0 }))
+      title!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('input[type="checkbox"]')).not.toBeNull()
+    expect(onToggleSelect).toHaveBeenCalledWith('ch1')
+    expect(container.querySelector('#chapter-ch1 input[aria-label="章节名"]')).toBeNull()
+    expect(window.getSelection()?.toString() ?? '').toBe('')
+  })
+
+  it('does not enter select mode when the press slides away', () => {
+    const container = render(screen())
+    const title = container.querySelector('#chapter-ch1 .chapter-name')!
+    act(() => {
+      title.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
+      title.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, button: 0, clientX: 30, clientY: 10 }))
+      vi.advanceTimersByTime(LONG_PRESS_MS)
+    })
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull()
+  })
+
+  it('opens the title field on a short tap and allows selection only while it is focused', () => {
+    const onRenameChapter = vi.fn()
+    const container = render(screen({ onRenameChapter }))
+    const title = container.querySelector('#chapter-ch1 .chapter-name') as HTMLElement
+    act(() => {
+      title.click()
+    })
+    const input = container.querySelector('#chapter-ch1 input[aria-label="章节名"]') as HTMLInputElement
+    expect(input.value).toBe('茶峒')
+    input.focus()
+    const selection = new Event('selectstart', { bubbles: true, cancelable: true })
+    input.dispatchEvent(selection)
+    expect(selection.defaultPrevented).toBe(false)
+
+    act(() => {
+      input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+      vi.advanceTimersByTime(LONG_PRESS_MS)
+    })
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull()
+
+    act(() => {
+      const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      proto?.call(input, '边城')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(onRenameChapter).toHaveBeenCalledWith('ch1', '边城')
+  })
 })
 
 const partBook: BookRecord = {

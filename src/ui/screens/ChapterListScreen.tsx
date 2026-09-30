@@ -6,8 +6,23 @@ import type { BookRecord, ChapterIndex, ChapterKind } from '../../types/book'
 import { Icon, Segmented } from '../chrome'
 import { LONG_PRESS_MS, toggleSelected } from '../selection'
 
+function eventElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target
+  if (target instanceof Node) return target.parentElement
+  return null
+}
+
 function isChrome(target: EventTarget | null): boolean {
-  return Boolean((target as HTMLElement | null)?.closest?.('button, input, textarea, a, label'))
+  const el = eventElement(target)
+  if (!el || el.closest('.chapter-name')) return false
+  return Boolean(el.closest('button, input, textarea, a, label'))
+}
+
+function blockTextSelection(event: Event) {
+  const el = eventElement(event.target)
+  const field = el?.closest('input:not([type="checkbox"]), textarea')
+  if (field && document.activeElement === field) return
+  event.preventDefault()
 }
 
 function rangeText(group: PartGroup): string {
@@ -53,6 +68,7 @@ export function ChapterListScreen(props: {
   const [replaceHint, setReplaceHint] = useState('')
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [editingPart, setEditingPart] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(() =>
     initialCollapsed(
       partIds,
@@ -61,8 +77,17 @@ export function ChapterListScreen(props: {
     ),
   )
   const pressTimer = useRef<number | null>(null)
+  const pressOrigin = useRef<{ x: number; y: number } | null>(null)
   const longPressed = useRef(false)
   const placement = useRef<Map<string, string | undefined> | null>(null)
+  const chaptersRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const root = chaptersRef.current
+    if (!root) return
+    root.addEventListener('selectstart', blockTextSelection)
+    return () => root.removeEventListener('selectstart', blockTextSelection)
+  }, [])
 
   useEffect(() => {
     const next = new Map(props.book.chapters.map((ch) => [ch.id, ch.partId]))
@@ -118,13 +143,19 @@ export function ChapterListScreen(props: {
       window.clearTimeout(pressTimer.current)
       pressTimer.current = null
     }
+    pressOrigin.current = null
   }
 
-  const startPress = (id: string) => {
+  const startPress = (id: string, point: { x: number; y: number }) => {
     longPressed.current = false
     clearPress()
+    pressOrigin.current = point
     pressTimer.current = window.setTimeout(() => {
       longPressed.current = true
+      setEditingTitle(null)
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.closest('.chapter-card')) active.blur()
+      window.getSelection()?.removeAllRanges()
       setSelecting(true)
       setMenuFor(null)
       if (!props.selected.has(id)) props.onToggleSelect(id)
@@ -149,6 +180,9 @@ export function ChapterListScreen(props: {
     const kind = kindOf(ch)
     const number = outline.numbers.get(ch.id)
     const badge = number ? `第 ${number} 章` : '不编号'
+    const name = displayChapterName(ch.title)
+    const namePlaceholder = kind === 'unnumbered' ? '标题，如 楔子' : '章节名'
+    const editingThisTitle = editingTitle === ch.id && !selecting
     const group = outline.groupOf.get(ch.id)
     const leadsPart = Boolean(group?.part && group.chapters[0]?.id === ch.id)
     return (
@@ -158,7 +192,12 @@ export function ChapterListScreen(props: {
         className={props.selected.has(ch.id) && selecting ? 'chapter-card is-picked' : 'chapter-card'}
         onPointerDown={(e) => {
           if (e.button !== 0 || isChrome(e.target)) return
-          startPress(ch.id)
+          startPress(ch.id, { x: e.clientX, y: e.clientY })
+        }}
+        onPointerMove={(e) => {
+          const origin = pressOrigin.current
+          if (!origin) return
+          if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > 12) clearPress()
         }}
         onPointerUp={clearPress}
         onPointerCancel={clearPress}
@@ -202,12 +241,28 @@ export function ChapterListScreen(props: {
               {badge}
             </button>
           )}
-          <input
-            value={displayChapterName(ch.title)}
-            aria-label="章节名"
-            placeholder={kind === 'unnumbered' ? '标题，如 楔子' : '章节名'}
-            onChange={(e) => props.onRenameChapter(ch.id, e.target.value)}
-          />
+          {editingThisTitle ? (
+            <input
+              value={name}
+              aria-label="章节名"
+              placeholder={namePlaceholder}
+              autoFocus
+              onBlur={() => setEditingTitle((current) => (current === ch.id ? null : current))}
+              onChange={(e) => props.onRenameChapter(ch.id, e.target.value)}
+            />
+          ) : (
+            <button
+              type="button"
+              className={name ? 'chapter-name' : 'chapter-name is-empty'}
+              onClick={(e) => {
+                if (longPressed.current || selecting) return
+                e.stopPropagation()
+                setEditingTitle(ch.id)
+              }}
+            >
+              {name || namePlaceholder}
+            </button>
+          )}
         </div>
         {menuFor === ch.id && !selecting ? (
           <div className="chapter-menu">
@@ -420,7 +475,10 @@ export function ChapterListScreen(props: {
         {!selecting && replaceHint ? <p className="book-replace-hint">{replaceHint}</p> : null}
       </section>
 
-      <section className={hasParts ? 'book-panel book-panel-chapters has-parts' : 'book-panel book-panel-chapters'}>
+      <section
+        ref={chaptersRef}
+        className={hasParts ? 'book-panel book-panel-chapters has-parts' : 'book-panel book-panel-chapters'}
+      >
         {hasParts ? (
           <div className="part-switch" role="toolbar" aria-label={`分${word}切换`}>
             <div className="part-switch-list">

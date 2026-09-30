@@ -884,6 +884,20 @@ textarea {
   box-shadow: 0 1px 2px var(--shadow);
 }
 
+.chapter-card,
+.chapter-card * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.chapter-card input:not([type='checkbox']),
+.chapter-card textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 .chapter-card.is-picked {
   background: color-mix(in srgb, var(--cinnabar) 8%, var(--paper));
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--cinnabar) 45%, transparent);
@@ -954,6 +968,32 @@ textarea {
   min-height: 40px;
   font-size: 16px;
   font-weight: 600;
+}
+
+.chapter-title-row .chapter-name {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+  cursor: text;
+  opacity: 1;
+}
+
+.chapter-title-row .chapter-name:active {
+  opacity: 1;
+}
+
+.chapter-title-row .chapter-name.is-empty {
+  font-weight: 500;
+  color: var(--ink-soft);
 }
 
 .chapter-title-row input:not([type='checkbox']):focus {
