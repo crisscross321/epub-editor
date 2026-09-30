@@ -12,7 +12,7 @@ export function FindReplaceBar(props: {
   const [hint, setHint] = useState('')
 
   return (
-    <div className="findbar">
+    <div className="findbar" onMouseDown={(e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault() }}>
       <input
         value={search}
         placeholder="查找"

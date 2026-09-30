@@ -39,6 +39,7 @@ export interface Annotation {
   kind: AnnotationKind
   text: string
   note?: string
+  offset?: number
   createdAt: string
 }
 

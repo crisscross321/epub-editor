@@ -153,21 +153,20 @@ export async function saveDoc(
   doc: TiptapDoc,
   options?: { splitOnH1?: boolean },
 ): Promise<{ book: BookRecord; focusChapterId: string; focusDoc: TiptapDoc }> {
-  return enqueueByKey(`${bookId}::${chapterId}`, async () => {
+  return enqueueByKey(bookId, async () => {
     const book = await getBook(bookId)
     const chapter = book.chapters.find((ch) => ch.id === chapterId)
     if (!chapter) throw new Error('找不到这一章')
     const slices = splitDocByH1(doc, chapter.title)
     const title = slices[0]?.title ?? displayChapterName(chapter.title)
     if (!options?.splitOnH1 || slices.length <= 1) {
-      await db.putDoc(bookId, chapterId, doc)
       const chapters = book.chapters.map((ch) => (ch.id === chapterId ? { ...ch, title } : ch))
-      const nextBook = await saveBook({ ...book, chapters })
+      const nextBook = await db.updateBookWithDocs(bookId, (latest) => touch({ ...latest, chapters }), [{ chapterId, doc }])
       return { book: nextBook, focusChapterId: chapterId, focusDoc: doc }
     }
 
     const first = slices[0]!
-    await db.putDoc(bookId, chapterId, first.doc)
+    const documents = [{ chapterId, doc: first.doc }]
 
     const sorted = [...book.chapters].sort((a, b) => a.spineIndex - b.spineIndex)
     const afterIndex = sorted.findIndex((ch) => ch.id === chapterId)
@@ -182,7 +181,7 @@ export async function saveDoc(
         spineIndex: afterIndex + i,
         state: 'simplified',
       }
-      await db.putDoc(bookId, id, slice.doc)
+      documents.push({ chapterId: id, doc: slice.doc })
       created.push(next)
     }
 
@@ -193,7 +192,7 @@ export async function saveDoc(
         )
       : renamed
 
-    const nextBook = await saveBook({ ...book, chapters })
+    const nextBook = await db.updateBookWithDocs(bookId, (latest) => touch({ ...latest, chapters }), documents)
     const jumped = created[0]
     return {
       book: nextBook,
@@ -466,15 +465,12 @@ export async function saveProgress(
   chapterId: string,
   offset: number,
 ): Promise<BookRecord> {
-  const book = await getBook(bookId)
-  const next = {
+  return db.updateBookWithDocs(bookId, (book) => ({
     ...book,
     readChapterId: chapterId,
-    readOffset: Math.min(1, Math.max(0, offset)),
+    readOffset: Number.isFinite(offset) ? Math.min(1, Math.max(0, offset)) : 0,
     lastReadAt: now(),
-  }
-  await db.putBook(next)
-  return next
+  }))
 }
 
 export async function markExported(bookId: string): Promise<BookRecord> {
@@ -553,6 +549,7 @@ export async function addAnnotation(
   kind: 'bookmark' | 'highlight' | 'note',
   text: string,
   note?: string,
+  offset = 0,
 ): Promise<void> {
   await db.putAnnotation({
     id: newId(),
@@ -561,6 +558,7 @@ export async function addAnnotation(
     kind,
     text: text.trim(),
     note: note?.trim() || undefined,
+    offset: Math.min(1, Math.max(0, offset)),
     createdAt: now(),
   })
 }
@@ -574,8 +572,11 @@ export async function removeNote(id: string) {
 }
 
 export async function chapterPlain(bookId: string, chapter: ChapterIndex): Promise<string> {
-  const preview = await getChapterPreview(bookId, chapter)
-  return textFromHtml(preview.html)
+  if (chapter.state === 'simplified') {
+    return textFromDoc((await db.getDoc(bookId, chapter.id)) ?? emptyDoc())
+  }
+  const bytes = await db.getEntry(bookId, chapter.href)
+  return bytes ? textFromHtml(new TextDecoder().decode(bytes)) : ''
 }
 
 export async function isChapterEmpty(bookId: string, chapter: ChapterIndex): Promise<boolean> {
@@ -612,23 +613,25 @@ export async function replaceAllInBook(
   search: string,
   replacement: string,
 ): Promise<{ count: number; skipped: number }> {
-  const book = await getBook(bookId)
-  let count = 0
-  let skipped = 0
-  for (const chapter of book.chapters) {
-    if (chapter.state !== 'simplified') {
-      skipped += 1
-      continue
+  return enqueueByKey(bookId, async () => {
+    const book = await getBook(bookId)
+    let count = 0
+    let skipped = 0
+    const documents: { chapterId: string; doc: TiptapDoc }[] = []
+    const chapters = book.chapters.map(ch => ({ ...ch }))
+    for (const chapter of chapters) {
+      if (chapter.state !== 'simplified') { skipped += 1; continue }
+      const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
+      const result = replaceAllInDoc(doc, search, replacement)
+      if (result.count) {
+        count += result.count
+        documents.push({ chapterId: chapter.id, doc: result.doc })
+        chapter.title = splitDocByH1(result.doc, chapter.title)[0]?.title ?? chapter.title
+      }
     }
-    const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
-    const result = replaceAllInDoc(doc, search, replacement)
-    if (result.count) {
-      count += result.count
-      await db.putDoc(bookId, chapter.id, result.doc)
-    }
-  }
-  if (count) await saveBook(book)
-  return { count, skipped }
+    if (count) await db.updateBookWithDocs(bookId, latest => touch({ ...latest, chapters }), documents)
+    return { count, skipped }
+  })
 }
 
 export async function mergeChapters(bookId: string, firstId: string, secondId: string): Promise<BookRecord> {

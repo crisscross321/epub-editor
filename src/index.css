@@ -484,11 +484,13 @@ textarea {
 }
 
 .preview-chapter {
+  display: flow-root;
   -webkit-user-select: text;
   user-select: text;
 }
 
 .preview-chapter.is-spacer {
+  padding: 0;
   overflow: hidden;
   pointer-events: none;
 }
@@ -1188,3 +1190,19 @@ textarea {
   color: #c5d4b4;
 }
 
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--paper) 75%, transparent);
+  color: var(--ink);
+  cursor: wait;
+}
+.save-status {
+  padding: 4px 18px;
+  font-size: 12px;
+  color: var(--muted);
+}

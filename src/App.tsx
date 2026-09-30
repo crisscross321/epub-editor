@@ -47,6 +47,10 @@ export default function App() {
   const [cover, setCover] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [saveState, setSaveState] = useState<'saved' | 'pending' | 'saving' | 'error'>('saved')
+  const editVersion = useRef(0)
+  const transitionRef = useRef(false)
+  const pendingProgress = useRef<{ bookId: string; chapterId: string; offset: number } | null>(null)
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -140,24 +144,20 @@ export default function App() {
     await refreshShelf()
   }
 
-  const leaveEditor = (to: Route, splitOnH1 = false) => {
-    const current = routeRef.current
-    if (current.name !== 'editor') return
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current)
-      saveTimer.current = null
+  const leaveEditor = async (to: Route, splitOnH1 = false) => {
+    if (routeRef.current.name !== 'editor' || transitionRef.current) return
+    transitionRef.current = true
+    setBusy(true)
+    try {
+      const result = await flushEditor(splitOnH1)
+      if (!result) return
+      setDoc(null)
+      docRef.current = null
+      setRoute(to)
+    } finally {
+      transitionRef.current = false
+      setBusy(false)
     }
-    const currentDoc = docRef.current
-    setDoc(null)
-    setRoute(to)
-    if (currentDoc) {
-      void books
-        .saveDoc(current.bookId, current.chapterId, currentDoc, { splitOnH1 })
-        .then((result) => setBook(result.book))
-        .catch(fail)
-      return
-    }
-    void loadBook(current.bookId)
   }
 
   const flushEditor = (splitOnH1 = false) => {
@@ -168,10 +168,13 @@ export default function App() {
       window.clearTimeout(saveTimer.current)
       saveTimer.current = null
     }
+    const version = editVersion.current
+    setSaveState('saving')
     return books
       .saveDoc(current.bookId, current.chapterId, currentDoc, { splitOnH1 })
       .then((result) => {
-        setBook(result.book)
+        if (bookRef.current?.id === result.book.id) setBook(result.book)
+        if (editVersion.current === version) setSaveState('saved')
         if (result.focusChapterId !== current.chapterId) {
           setDoc(result.focusDoc)
           setRoute({ name: 'editor', bookId: current.bookId, chapterId: result.focusChapterId, from: current.from })
@@ -179,12 +182,15 @@ export default function App() {
         return result
       })
       .catch((err) => {
+        setSaveState('error')
         fail(err)
         return undefined
       })
   }
 
   const goBack = () => {
+    if (transitionRef.current) return
+    void flushProgress()
     if (confirmRef.current) {
       setConfirm(null)
       return
@@ -210,20 +216,12 @@ export default function App() {
         })
         return
       }
-      setConfirm({
-        title: '离开编辑？',
-        body: '确定返回？修改会自动保存。',
-        confirm: '离开',
-        action: () => {
-          setConfirm(null)
-          leaveEditor(next, false)
-        },
-      })
+      void leaveEditor(next, false)
       return
     }
     if (current.name === 'preview') {
       if (previewBackTarget(current) === 'editor') {
-        void openChapter(current.chapterId || bookRef.current?.readChapterId || '', 'preview')
+        void openChapter(bookRef.current?.readChapterId || current.chapterId || '', 'preview')
         return
       }
       setRoute({ name: 'chapters', bookId: current.bookId })
@@ -271,11 +269,24 @@ export default function App() {
     }
   }, [loadTrashMeta])
 
+  const flushProgress = async () => {
+    if (progressTimer.current) window.clearTimeout(progressTimer.current)
+    progressTimer.current = null
+    const pending = pendingProgress.current
+    pendingProgress.current = null
+    if (!pending) return
+    try { await books.saveProgress(pending.bookId, pending.chapterId, pending.offset) }
+    catch (err) { fail(err) }
+  }
+  const flushProgressRef = useRef(flushProgress)
+  flushProgressRef.current = flushProgress
+
   useEffect(() => {
     const onHidden = () => {
-      if (document.visibilityState === 'hidden') void flushEditorRef.current()
+      if (document.visibilityState === 'hidden') { void flushEditorRef.current(); void flushProgressRef.current() }
     }
     const onPageHide = () => {
+      void flushProgressRef.current()
       void flushEditorRef.current()
     }
     document.addEventListener('visibilitychange', onHidden)
@@ -283,7 +294,7 @@ export default function App() {
     let handle: { remove: () => Promise<void> } | undefined
     void import('@capacitor/app')
       .then(({ App }) => App.addListener('appStateChange', (state) => {
-        if (!state.isActive) void flushEditorRef.current()
+        if (!state.isActive) { void flushEditorRef.current(); void flushProgressRef.current() }
       }))
       .then((next) => {
         handle = next
@@ -408,6 +419,8 @@ export default function App() {
       const opened = await books.openChapterForEdit(book.id, chapterId)
       const hydrated = await books.hydrateDocImages(book.id, opened)
       setDoc(hydrated)
+      docRef.current = hydrated
+      setSaveState('saved')
       await loadBook(book.id)
       setRoute({ name: 'editor', bookId: book.id, chapterId, from })
     } catch (err) {
@@ -460,24 +473,44 @@ export default function App() {
     if (route.name !== 'editor' || !book) return
     const chapterId = route.chapterId
     const bookId = book.id
+    docRef.current = next
     setDoc(next)
+    const version = ++editVersion.current
+    setSaveState('pending')
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null
+      setSaveState('saving')
       void books
         .saveDoc(bookId, chapterId, next, { splitOnH1: false })
         .then((result) => {
-          setBook(result.book)
+          if (bookRef.current?.id === bookId) setBook(result.book)
+          if (version === editVersion.current) setSaveState('saved')
         })
-        .catch(fail)
+        .catch((err) => { setSaveState('error'); fail(err) })
     }, 400)
   }
 
+  const changeEditorChapter = async (id?: string) => {
+    if (!id || transitionRef.current) return
+    transitionRef.current = true
+    setBusy(true)
+    try {
+      const current = routeRef.current
+      if (current.name !== 'editor') return
+      if (await flushEditor()) await openChapter(id, current.from ?? 'chapters')
+    } finally { transitionRef.current = false; setBusy(false) }
+  }
+
   const onInsertImage = async () => {
-    if (!book) return
+    if (!book || route.name !== 'editor') return
+    const origin = route
     const file = await pickImageFile()
     if (!file) return
     try {
       const inserted = await books.insertImage(book.id, file)
+      const current = routeRef.current
+      if (current.name !== 'editor' || current.bookId !== origin.bookId || current.chapterId !== origin.chapterId) return
       setPendingImage({ src: inserted.src, imageId: inserted.imageId })
     } catch (err) {
       fail(err)
@@ -619,7 +652,7 @@ export default function App() {
           </button>
         </div>
       ) : null}
-      {busy ? <div className="muted" style={{ padding: '8px 18px' }}>处理中…</div> : null}
+      {busy ? <div className="busy-overlay" role="status" aria-live="polite">正在保存或加载，请稍候…</div> : null}
       {undo?.kind === 'chapter' && route.name === 'chapters' ? (
         <div className="banner banner-ok" role="status">
           已删除「{undo.title}」
@@ -907,6 +940,11 @@ export default function App() {
       ) : null}
 
       {route.name === 'editor' && doc ? (
+        <div inert={busy}>
+        <div className="save-status" role="status">
+          {saveState === 'saved' ? '已保存到本机' : saveState === 'saving' ? '正在保存…' : saveState === 'pending' ? '有修改待保存' : '保存失败，正文仍保留在当前页面'}
+          {saveState === 'error' ? <button type="button" onClick={() => void flushEditor()}>重试保存</button> : null}
+        </div>
         <ErrorBoundary>
           <EditorScreen
             docKey={`${route.bookId}:${route.chapterId}`}
@@ -930,43 +968,49 @@ export default function App() {
                 confirm: '拆章',
                 action: () => {
                   setConfirm(null)
-                  void flushEditor(true)
+                  if (transitionRef.current) return
+                  transitionRef.current = true
+                  setBusy(true)
+                  void flushEditor(true).finally(() => { transitionRef.current = false; setBusy(false) })
                 },
               })
             }}
-            onPrevChapter={() => {
-              const id = neighbors.prevId
-              if (!id) return
-              void flushEditor(false).then((result) => {
-                if (!result) return
-                books.releaseBookImages(route.bookId)
-                void openChapter(id, route.from ?? 'chapters')
-              })
-            }}
-            onNextChapter={() => {
-              const id = neighbors.nextId
-              if (!id) return
-              void flushEditor(false).then((result) => {
-                if (!result) return
-                books.releaseBookImages(route.bookId)
-                void openChapter(id, route.from ?? 'chapters')
-              })
-            }}
+            onPrevChapter={() => void changeEditorChapter(neighbors.prevId)}
+            onNextChapter={() => void changeEditorChapter(neighbors.nextId)}
             hasPrevChapter={Boolean(neighbors.prevId)}
             hasNextChapter={Boolean(neighbors.nextId)}
             onReplaceBook={(search, replacement) => {
-              void books.replaceAllInBook(route.bookId, search, replacement).then((result) => {
-                setNotice({
-                  kind: 'ok',
-                  text: `已替换 ${result.count} 处${result.skipped ? `，${result.skipped} 章尚未编辑未改动` : ''}`,
-                })
-                return books.getDoc(route.bookId, route.chapterId).then((next) => {
-                  if (next) setDoc(next)
-                })
-              }).catch(fail)
+              setConfirm({
+                title: '全书替换？',
+                body: '将替换所有已编辑章节中的匹配文字。尚未编辑的原始章节保持不变。此操作不能用编辑器的撤销恢复，建议先导出备份。',
+                confirm: '确认替换',
+                action: () => {
+                  setConfirm(null)
+                  if (transitionRef.current) return
+                  transitionRef.current = true
+                  setBusy(true)
+                  void (async () => {
+                    try {
+                      const saved = await flushEditor()
+                      if (!saved) return
+                      const result = await books.replaceAllInBook(route.bookId, search, replacement)
+                      const next = await books.getDoc(route.bookId, route.chapterId)
+                      if (next) {
+                        const hydrated = await books.hydrateDocImages(route.bookId, next)
+                        docRef.current = hydrated
+                        setDoc(hydrated)
+                      }
+                      await loadBook(route.bookId)
+                      setNotice({ kind: 'ok', text: `已替换 ${result.count} 处，${result.skipped} 章未编辑未改动` })
+                    } catch (err) { fail(err) }
+                    finally { transitionRef.current = false; setBusy(false) }
+                  })()
+                },
+              })
             }}
           />
         </ErrorBoundary>
+        </div>
       ) : null}
 
       {route.name === 'preview' && book ? (
@@ -976,14 +1020,16 @@ export default function App() {
           settings={settings}
           onSettings={patchSettings}
           onBack={goBack}
-          onEdit={(id) => void openChapter(id, 'preview')}
+          onEdit={(id) => { void flushProgress(); void openChapter(id, 'preview') }}
           onProgress={(chapterId, offset) => {
+            const next = { ...bookRef.current!, readChapterId: chapterId, readOffset: offset }
+            bookRef.current = next
+            setBook(next)
+            pendingProgress.current = { bookId: book.id, chapterId, offset }
             if (progressTimer.current) window.clearTimeout(progressTimer.current)
-            progressTimer.current = window.setTimeout(() => {
-              void books.saveProgress(book.id, chapterId, offset).then(setBook)
-            }, 400)
+            progressTimer.current = window.setTimeout(() => void flushProgress(), 400)
           }}
-          onOpenSettings={() => setRoute({ name: 'settings', bookId: book.id })}
+          onOpenSettings={() => { void flushProgress(); setRoute({ name: 'settings', bookId: book.id }) }}
         />
       ) : null}
 

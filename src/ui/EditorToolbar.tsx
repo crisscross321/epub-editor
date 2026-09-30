@@ -43,7 +43,7 @@ export function EditorToolbar(props: {
 
   return (
     <div className="editor-chrome" ref={wrap}>
-      <div className="toolbar">
+      <div className="toolbar" onMouseDown={(e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault() }}>
         <button type="button" className={props.headingOn(1) ? 'is-on' : ''} onClick={() => props.onHeading(1)}>
           H1
         </button>

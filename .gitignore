@@ -35,3 +35,6 @@ docs/superpowers/
 .workbuddy/
 .cursor/
 .claude/
+
+playwright-report/
+test-results/

@@ -30,7 +30,8 @@ export function keyboardPadding(args: {
   if (measured > 0) return measured + 48
   const layoutShrunk = args.baselineInnerHeight - args.innerHeight
   if (layoutShrunk > 80) return 48
-  if (args.focused) return Math.round(args.innerHeight * 0.45)
+  // Focus alone is not evidence of a software keyboard (desktop/hardware keyboard).
+  if (args.focused) return 0
   return 0
 }
 
@@ -88,6 +89,7 @@ function focusedRect(): { top: number; bottom: number } | null {
     const rect = active.getBoundingClientRect()
     return { top: rect.top, bottom: rect.bottom }
   }
+  if (!(active instanceof HTMLElement) || !active.isContentEditable) return null
   const sel = window.getSelection()
   if (!sel || sel.rangeCount === 0 || !sel.anchorNode) return null
   const editor = document.querySelector('.ProseMirror')
@@ -129,6 +131,7 @@ export function bindKeyboardReveal(): () => void {
   const reveal = () => {
     if (!isEditing()) baseline = window.innerHeight
     syncInset()
+    if (!isEditing()) return
     const sel = window.getSelection()
     const collapsed = !sel || sel.rangeCount === 0 || sel.isCollapsed
     if (!shouldRevealFocusedInput({ collapsed, composing })) return
@@ -147,7 +150,6 @@ export function bindKeyboardReveal(): () => void {
     reveal()
   }
   vv?.addEventListener('resize', reveal)
-  vv?.addEventListener('scroll', reveal)
   window.addEventListener('resize', reveal)
   document.addEventListener('selectionchange', reveal)
   document.addEventListener('focusin', reveal)
@@ -159,7 +161,6 @@ export function bindKeyboardReveal(): () => void {
   syncInset()
   return () => {
     vv?.removeEventListener('resize', reveal)
-    vv?.removeEventListener('scroll', reveal)
     window.removeEventListener('resize', reveal)
     document.removeEventListener('selectionchange', reveal)
     document.removeEventListener('focusin', reveal)

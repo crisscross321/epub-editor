@@ -6,6 +6,7 @@ import { exportChapterHeading } from '../../epub/headings'
 import { shouldRenderOuterTitle } from '../../epub/plain'
 import { sanitizeHtml } from '../../epub/sanitize'
 import { outlineFromXhtml } from '../../epub/toc'
+import { captureAnchor, restoreAnchor, type ReadingAnchor } from '../../reader/position'
 import { highlightQuery } from '../../reader/highlight'
 import { readerBodyCss } from '../../reader/style'
 import {
@@ -18,7 +19,6 @@ import {
   offsetInChapter,
   readChapterBoxes,
   scrollTopForOffset,
-  shouldShiftScrollForResize,
   type ChapterRange,
 } from '../../reader/stream'
 import { fontSizePx, type AppSettings } from '../../storage/settings'
@@ -28,7 +28,8 @@ import { tightenBlankHtml } from '../blankLines'
 function chapterPreviewBody(html: string, heading: string, highlight: string): string {
   const tightened = tightenBlankHtml(html)
   const body = tightened.replace(/<\/?html[^>]*>/gi, '').replace(/<\/?head[\s\S]*?<\/head>/gi, '').replace(/<\/?body[^>]*>/gi, '')
-  const title = shouldRenderOuterTitle(tightened, heading) ? `<h1>${heading}</h1>` : ''
+  const safeHeading = heading.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const title = shouldRenderOuterTitle(tightened, heading) ? `<h1>${safeHeading}</h1>` : ''
   return highlightQuery(sanitizeHtml(`${title}${body}`), highlight)
 }
 
@@ -62,7 +63,7 @@ const PreviewChapter = memo(function PreviewChapter(props: {
       dangerouslySetInnerHTML={{ __html: props.html }}
     />
   )
-})
+}, (prev, next) => prev.id === next.id && prev.html === next.html && (next.html !== null || prev.spacerHeight === next.spacerHeight))
 
 export function PreviewScreen(props: {
   book: BookRecord
@@ -94,6 +95,16 @@ export function PreviewScreen(props: {
   const [chrome, setChrome] = useState(true)
   const [panel, setPanel] = useState<'toc' | 'search' | 'notes' | 'type' | null>(null)
   const [query, setQuery] = useState(props.highlight ?? '')
+  const [draftQuery, setDraftQuery] = useState(props.highlight ?? '')
+  const [searching, setSearching] = useState(false)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+  const requestRef = useRef(0)
+  const anchorRef = useRef<ReadingAnchor | null>(null)
+  const frameCleanup = useRef<() => void>(() => {})
+  const turnRef = useRef<(dir: -1 | 1) => void>(() => {})
+  const progressRef = useRef(props.onProgress)
+  progressRef.current = props.onProgress
   const [hits, setHits] = useState<{ chapterId: string; title: string; snippet: string }[]>([])
   const [notes, setNotes] = useState<Annotation[]>([])
   const [page, setPage] = useState(0)
@@ -157,10 +168,11 @@ export function PreviewScreen(props: {
   useEffect(() => {
     if (props.book.id) {
       heightMap.current = new Map()
+      anchorRef.current = null
       setBodies({})
       setWarnings({})
     }
-  }, [props.book.id, query])
+  }, [props.book.id])
 
   useEffect(() => {
     const from = win.from
@@ -169,6 +181,8 @@ export function PreviewScreen(props: {
     const bookId = props.book.id
     const q = query
     const slice = chapters.slice(from, to + 1)
+    let cancelled = false
+    setError('')
     void Promise.all(
       slice.map(async (ch, offsetInSlice) => {
         const i = from + offsetInSlice
@@ -180,7 +194,7 @@ export function PreviewScreen(props: {
         }
       }),
     ).then((rows) => {
-      if (bookId !== bookIdRef.current || q !== queryRef.current) return
+      if (cancelled || bookId !== bookIdRef.current || q !== queryRef.current) return
       setBodies((prev) => mergeChapterBodies(prev, rows))
       setWarnings((prev) => {
         let changed = false
@@ -193,21 +207,21 @@ export function PreviewScreen(props: {
         }
         return changed ? next : prev
       })
-      if (paged) setPage(0)
+    }).catch(() => {
+      if (!cancelled) setError('章节加载失败，请重试。已保存的书稿不受影响。')
     })
-  }, [chapters, paged, props.book.id, query, win.from, win.to])
+    return () => { cancelled = true }
+  }, [chapters, paged, props.book.id, query, win.from, win.to, retry])
 
   useEffect(() => {
-    void books.listNotes(props.book.id).then(setNotes)
+    let cancelled = false
+    void books.listNotes(props.book.id).then((next) => {
+      if (!cancelled) setNotes(next)
+    }).catch(() => { if (!cancelled) setError('笔记读取失败，请重试。') })
+    return () => { cancelled = true }
   }, [props.book.id, panel])
 
-  useEffect(() => {
-    const doc = frame.current?.contentDocument
-    if (!doc?.documentElement || !paged) return
-    const el = doc.documentElement
-    const next = Math.max(1, Math.ceil(el.scrollHeight / Math.max(el.clientHeight, 1)))
-    setPages(next)
-  }, [pageHtml, paged, props.settings])
+  useEffect(() => () => frameCleanup.current(), [])
 
   const jumpTo = (nextIndex: number, nextOffset = 0) => {
     if (nextIndex < 0 || nextIndex >= chapters.length) return
@@ -225,7 +239,7 @@ export function PreviewScreen(props: {
     const jump = pendingJump.current
     if (!jump) return
     const el = stream.querySelector(`[data-chapter-id="${escapeAttr(jump.chapterId)}"]`) as HTMLElement | null
-    if (!el) return
+    if (!el || !bodies[jump.chapterId] || el.classList.contains('is-spacer')) return
     if (!canApplyChapterJump({ targetHeight: el.offsetHeight })) return
     const desired = scrollTopForOffset(
       stream.clientHeight,
@@ -242,6 +256,7 @@ export function PreviewScreen(props: {
     const maxScroll = Math.max(0, stream.scrollHeight - stream.clientHeight)
     if (jumpSettled({ desired, actual: stream.scrollTop, maxScroll, tries: jumpTries.current })) {
       pendingJump.current = null
+      anchorRef.current = captureAnchor(stream)
       jumpTries.current = 0
       for (const node of stream.querySelectorAll<HTMLElement>('[data-chapter-id]')) {
         const id = node.getAttribute('data-chapter-id')
@@ -278,8 +293,12 @@ export function PreviewScreen(props: {
       hydRef.current = nextHyd
       setHyd(nextHyd)
     }
-    applyJump(stream)
-  }, [bodies, chapter, chapters, index, paged])
+    if (pendingJump.current) applyJump(stream)
+    else {
+      restoreAnchor(stream, anchorRef.current)
+      anchorRef.current = captureAnchor(stream)
+    }
+  }, [bodies, chapter, chapters, index, paged, props.settings, chrome])
 
   useEffect(() => {
     if (paged) return
@@ -287,45 +306,24 @@ export function PreviewScreen(props: {
     if (!stream) return
     const nodes = [...stream.querySelectorAll<HTMLElement>('[data-chapter-id]')]
     if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const el = entry.target as HTMLElement
-        const id = el.getAttribute('data-chapter-id')
-        if (!id) continue
-        const nextH = el.offsetHeight
-        const prevH = heightMap.current.get(id)
-        heightMap.current.set(id, nextH)
-        if (pendingJump.current || prevH == null) {
-          if (pendingJump.current) applyJump(stream)
-          continue
-        }
-        const currentId = chapters[indexRef.current]?.id
-        const currentEl = currentId
-          ? (stream.querySelector(`[data-chapter-id="${escapeAttr(currentId)}"]`) as HTMLElement | null)
-          : null
-        const resizedIsBeforeCurrent = Boolean(
-          currentEl && (el.compareDocumentPosition(currentEl) & Node.DOCUMENT_POSITION_FOLLOWING),
-        )
-        const resizedCurrentWhileScrolled = Boolean(
-          id === currentId && currentEl && stream.scrollTop > currentEl.offsetTop + 1,
-        )
-        if (shouldShiftScrollForResize(resizedIsBeforeCurrent, nextH - prevH, resizedCurrentWhileScrolled)) {
-          ignoreScroll.current = true
-          stream.scrollTop += nextH - prevH
-          window.requestAnimationFrame(() => {
-            ignoreScroll.current = false
-          })
-        }
-      }
+    const ro = new ResizeObserver(() => {
       if (pendingJump.current) applyJump(stream)
+      else restoreAnchor(stream, anchorRef.current)
+      for (const node of nodes) {
+        const id = node.getAttribute('data-chapter-id')
+        if (id && !node.classList.contains('is-spacer')) heightMap.current.set(id, node.offsetHeight)
+      }
+      anchorRef.current = captureAnchor(stream)
     })
+    ro.observe(stream)
     for (const node of nodes) ro.observe(node)
     return () => ro.disconnect()
   }, [bodies, paged, hyd.from, hyd.to, chapters.length])
 
   const onStreamScroll = () => {
     const stream = streamRef.current
-    if (!stream || ignoreScroll.current || paged) return
+    if (!stream || ignoreScroll.current || pendingJump.current || paged) return
+    anchorRef.current = captureAnchor(stream)
     const boxes = readChapterBoxes(stream)
     const id = chapterIdAtScroll(boxes, stream.scrollTop, stream.clientHeight, stream.scrollHeight)
     const box = id ? boxes.find((item) => item.id === id) : boxes.find((item) => item.id === chapters[indexRef.current]?.id)
@@ -343,12 +341,8 @@ export function PreviewScreen(props: {
   const onStreamClick = (e: MouseEvent<HTMLDivElement>) => {
     if (textSelecting(document)) return
     if ((e.target as HTMLElement).closest('a')) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const w = rect.width
-    if (x < w * 0.22) jumpTo(index - 1)
-    else if (x > w * 0.78) jumpTo(index + 1)
-    else setChrome((v) => !v)
+    if (panel) return
+    setChrome((v) => !v)
   }
 
   const emitStreamSel = () => {
@@ -369,37 +363,62 @@ export function PreviewScreen(props: {
   }
 
   const onFrameLoad = () => {
+    frameCleanup.current()
     const winFrame = frame.current?.contentWindow
     const doc = frame.current?.contentDocument
-    if (!winFrame || !doc) return
+    if (!winFrame || !doc || !chapter || !bodyHtml) return
+    const chapterId = chapter.id
+    const el = doc.documentElement
+    // srcDoc is an isolated document and does not inherit theme variables.
+    const theme = getComputedStyle(document.documentElement)
+    el.style.setProperty('--ink', theme.getPropertyValue('--ink'))
+    const measure = () => {
+      const height = Math.max(el.clientHeight, 1)
+      setPages(Math.max(1, Math.ceil(el.scrollHeight / height)))
+      setPage(Math.floor((el.scrollTop + 1) / height))
+    }
+    const restore = () => {
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight) * offsetRef.current
+      measure()
+    }
+    restore()
+    if (pendingJump.current?.chapterId === chapterId) pendingJump.current = null
     const emitSel = () => {
       const selection = doc.getSelection()
       const text = selection?.toString().trim() ?? ''
-      if (!text) {
-        setSel(null)
-        return
-      }
-      const range = selection!.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      setSel({ text, x: rect.left, y: rect.bottom })
+      if (!text || !selection?.rangeCount) { setSel(null); return }
+      const rect = selection.getRangeAt(0).getBoundingClientRect()
+      const host = frame.current!.getBoundingClientRect()
+      setSel({ text, x: host.left + rect.left, y: host.top + rect.bottom })
+    }
+    const scroll = () => {
+      const max = el.scrollHeight - el.clientHeight
+      const nextOffset = max <= 0 ? 0 : el.scrollTop / max
+      offsetRef.current = nextOffset
+      setOffset(nextOffset)
+      measure()
+      progressRef.current(chapterId, nextOffset)
+    }
+    const click = (e: globalThis.MouseEvent) => {
+      if (textSelecting(doc) || (e.target as HTMLElement).closest('a')) return
+      if (e.clientX < winFrame.innerWidth * 0.28) turnRef.current(-1)
+      else if (e.clientX > winFrame.innerWidth * 0.72) turnRef.current(1)
+      else setChrome((v) => !v)
     }
     doc.addEventListener('mouseup', emitSel)
     doc.addEventListener('touchend', emitSel)
-    winFrame.addEventListener('scroll', () => {
-      const el = doc.documentElement
-      const max = el.scrollHeight - el.clientHeight
-      const nextOffset = max <= 0 ? 1 : el.scrollTop / max
-      setOffset(nextOffset)
-      if (chapter) props.onProgress(chapter.id, nextOffset)
-    })
-    winFrame.addEventListener('click', (e) => {
-      const x = e.clientX
-      const w = winFrame.innerWidth
-      if (textSelecting(doc)) return
-      if (x < w * 0.28) turn(-1)
-      else if (x > w * 0.72) turn(1)
-      else setChrome((v) => !v)
-    })
+    winFrame.addEventListener('scroll', scroll)
+    winFrame.addEventListener('click', click)
+    winFrame.addEventListener('resize', restore)
+    doc.addEventListener('load', restore, true)
+    frameCleanup.current = () => {
+      doc.removeEventListener('mouseup', emitSel)
+      doc.removeEventListener('touchend', emitSel)
+      winFrame.removeEventListener('scroll', scroll)
+      winFrame.removeEventListener('click', click)
+      winFrame.removeEventListener('resize', restore)
+      doc.removeEventListener('load', restore, true)
+    }
   }
 
   const turn = (dir: -1 | 1) => {
@@ -408,18 +427,20 @@ export function PreviewScreen(props: {
       jumpTo(index + dir)
       return
     }
-    const next = page + dir
+    const next = Math.floor((doc.scrollTop + 1) / Math.max(doc.clientHeight, 1)) + dir
     if (next < 0) {
-      jumpTo(index - 1)
+      jumpTo(index - 1, 1)
       return
     }
-    if (next >= pages) {
+    if (next >= Math.ceil(doc.scrollHeight / Math.max(doc.clientHeight, 1))) {
       jumpTo(index + 1)
       return
     }
     setPage(next)
     doc.scrollTop = next * doc.clientHeight
   }
+
+  turnRef.current = turn
 
   const remaining = chapter
     ? readingMinutes(Math.round(countChars(textFromHtml(bodyHtml)) * (1 - offset)))
@@ -461,6 +482,8 @@ export function PreviewScreen(props: {
         </div>
       ) : null}
 
+      {error ? <div role="alert" className="banner">{error}<button type="button" onClick={() => setRetry(n => n + 1)}>重试</button></div> : null}
+      {!bodyHtml && !error ? <p role="status">正在加载章节…</p> : null}
       {warning ? <p className="muted preview-warning">{warning}</p> : null}
 
       {paged ? (
@@ -488,7 +511,7 @@ export function PreviewScreen(props: {
             <PreviewChapter
               key={ch.id}
               id={ch.id}
-              html={i >= hyd.from && i <= hyd.to ? (bodies[ch.id] ?? '') : null}
+              html={i >= hyd.from && i <= hyd.to ? (bodies[ch.id] ?? null) : null}
               spacerHeight={heightMap.current.get(ch.id) ?? 0}
             />
           ))}
@@ -507,7 +530,7 @@ export function PreviewScreen(props: {
           <button
             className="btn btn-ghost btn-compact"
             type="button"
-            disabled={index >= chapters.length - 1 && page >= pages - 1}
+            disabled={index >= chapters.length - 1 && (!paged || page >= pages - 1)}
             onClick={() => turn(1)}
           >
             {paged ? '下一页' : '下一章'}
@@ -516,9 +539,9 @@ export function PreviewScreen(props: {
       ) : null}
 
       {sel ? (
-        <div className="sel-pop" style={{ left: Math.max(12, sel.x), top: sel.y + (paged ? 48 : 8) }}>
+        <div className="sel-pop" style={{ left: Math.max(12, sel.x), top: sel.y + 8 }}>
           <button type="button" onClick={() => void addNote('highlight', sel.text)}>
-            划线
+            摘抄
           </button>
           <button type="button" onClick={() => void addNote('bookmark', sel.text || chapter.title)}>
             书签
@@ -537,6 +560,7 @@ export function PreviewScreen(props: {
 
       {panel === 'toc' ? (
         <aside className="drawer">
+          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
           <h3>目录</h3>
           {chapters.map((ch, i) => {
             const items = outlineFromXhtml(i === index ? bodyHtml : '')
@@ -567,15 +591,26 @@ export function PreviewScreen(props: {
 
       {panel === 'search' ? (
         <aside className="drawer">
+          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
           <h3>全书搜索</h3>
           <div className="row">
-            <input value={query} placeholder="书中的一句话" onChange={(e) => setQuery(e.target.value)} />
+            <input value={draftQuery} placeholder="书中的一句话" aria-label="全书搜索" onChange={(e) => { setDraftQuery(e.target.value); requestRef.current += 1; setSearching(false) }} />
             <button
               className="btn"
               type="button"
-              onClick={() => void books.searchBook(props.book.id, query).then(setHits)}
+              disabled={searching || !draftQuery.trim()}
+              onClick={async () => {
+                const request = ++requestRef.current
+                setSearching(true)
+                setQuery(draftQuery)
+                try {
+                  const next = await books.searchBook(props.book.id, draftQuery)
+                  if (request === requestRef.current) setHits(next)
+                } catch { setError('搜索失败，请重试。') }
+                finally { if (request === requestRef.current) setSearching(false) }
+              }}
             >
-              找
+              {searching ? '搜索中…' : '找'}
             </button>
           </div>
           {hits.map((hit, i) => (
@@ -598,6 +633,7 @@ export function PreviewScreen(props: {
 
       {panel === 'notes' ? (
         <aside className="drawer">
+          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
           <h3>书签与笔记</h3>
           <button
             className="btn btn-ghost"
@@ -606,11 +642,11 @@ export function PreviewScreen(props: {
           >
             在本章加书签
           </button>
-          {notes.length === 0 ? <p className="muted">还没有划线或笔记。</p> : null}
+          {notes.length === 0 ? <p className="muted">还没有摘抄或笔记。</p> : null}
           {notes.map((note) => (
             <article key={note.id} className="note-card">
               <div className="muted">
-                {note.kind === 'bookmark' ? '书签' : note.kind === 'highlight' ? '划线' : '笔记'}
+                {note.kind === 'bookmark' ? '书签' : note.kind === 'highlight' ? '摘抄' : '笔记'}
               </div>
               <p>{note.text}</p>
               {note.note ? <p className="muted">{note.note}</p> : null}
@@ -620,7 +656,7 @@ export function PreviewScreen(props: {
                   type="button"
                   onClick={() => {
                     const next = chapters.findIndex((ch) => ch.id === note.chapterId)
-                    if (next >= 0) jumpTo(next)
+                    if (next >= 0) jumpTo(next, note.offset ?? 0)
                     setPanel(null)
                   }}
                 >
@@ -637,6 +673,7 @@ export function PreviewScreen(props: {
 
       {panel === 'type' ? (
         <aside className="drawer">
+          <button type="button" onClick={() => setPanel(null)} aria-label="关闭面板">关闭</button>
           <h3>阅读版式</h3>
           <div className="row">
             {(['s', 'm', 'l'] as const).map((size) => (
@@ -708,10 +745,12 @@ export function PreviewScreen(props: {
   )
 
   async function addNote(kind: Annotation['kind'], text: string, note?: string) {
-    await books.addAnnotation(props.book.id, chapter.id, kind, text, note)
-    setNotes(await books.listNotes(props.book.id))
-    setSel(null)
-    setNoteDraft('')
+    try {
+      await books.addAnnotation(props.book.id, chapter.id, kind, text, note, offsetRef.current)
+      setNotes(await books.listNotes(props.book.id))
+      setSel(null)
+      setNoteDraft('')
+    } catch { setError('笔记保存失败，请重试。') }
   }
 }
 

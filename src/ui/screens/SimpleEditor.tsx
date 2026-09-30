@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { findInRoot } from '../../editor/find'
 import { simplifyXhtml } from '../../epub/simplify'
 import { parseHtml } from '../../epub/xml'
@@ -49,6 +49,8 @@ export function SimpleEditor(props: {
 }) {
   const surface = useRef<HTMLDivElement>(null)
   const parsedDoc = useRef<TiptapDoc>(props.doc)
+  const selectionRef = useRef<Range | null>(null)
+  const composing = useRef(false)
   const wordTimer = useRef<number | null>(null)
   const [showFind, setShowFind] = useState(false)
   const [showOutline, setShowOutline] = useState(false)
@@ -56,20 +58,63 @@ export function SimpleEditor(props: {
   const [, setTick] = useState(0)
   const [wordCount, setWordCount] = useState(() => countChars(textFromDoc(props.doc)))
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = surface.current
     if (!el) return
     el.innerHTML = toInnerHtml(props.doc)
     markBlankBlocks(el)
+    parsedDoc.current = props.doc
+    selectionRef.current = null
     setPicked(null)
-    // chapter switch only
+    setWordCount(countChars(textFromDoc(props.doc)))
+    // A chapter switch is a new editing session; ordinary parent renders are not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.docKey])
+
+  useLayoutEffect(() => {
+    if (props.doc === parsedDoc.current || composing.current) return
+    const el = surface.current
+    if (!el) return
+    const scroll = document.scrollingElement?.scrollTop ?? 0
+    el.innerHTML = toInnerHtml(props.doc)
+    markBlankBlocks(el)
+    parsedDoc.current = props.doc
+    selectionRef.current = null
+    setPicked(null)
+    setWordCount(countChars(textFromDoc(props.doc)))
+    if (document.scrollingElement) document.scrollingElement.scrollTop = scroll
+  }, [props.doc])
+
+  useEffect(() => {
+    const remember = () => {
+      const sel = window.getSelection()
+      if (sel?.rangeCount && surface.current?.contains(sel.anchorNode) && surface.current.contains(sel.focusNode)) {
+        selectionRef.current = sel.getRangeAt(0).cloneRange()
+      }
+    }
+    document.addEventListener('selectionchange', remember)
+    return () => {
+      document.removeEventListener('selectionchange', remember)
+      if (wordTimer.current) window.clearTimeout(wordTimer.current)
+    }
+  }, [])
+
+  const focusSurface = () => {
+    const el = surface.current
+    if (!el) return
+    el.focus({ preventScroll: true })
+    const range = selectionRef.current
+    if (range && el.contains(range.commonAncestorContainer)) {
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  }
 
   useEffect(() => {
     const el = surface.current
     if (!el || !props.pendingImage) return
-    el.focus()
+    focusSurface()
     const img = document.createElement('img')
     img.src = props.pendingImage.src
     img.setAttribute('data-image-id', props.pendingImage.imageId)
@@ -89,13 +134,6 @@ export function SimpleEditor(props: {
   }, [props.pendingImage])
 
   useEffect(() => {
-    parsedDoc.current = props.doc
-    setWordCount(countChars(textFromDoc(props.doc)))
-    // chapter switch only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.docKey])
-
-  useEffect(() => {
     if (!picked) return
     const sync = () => setTick((n) => n + 1)
     window.addEventListener('scroll', sync, true)
@@ -108,7 +146,7 @@ export function SimpleEditor(props: {
 
   const emitChange = () => {
     const el = surface.current
-    if (el) markBlankBlocks(el)
+    if (el && !composing.current) markBlankBlocks(el)
     const html = el?.innerHTML || '<p></p>'
     const next = simplifyXhtml(`<div>${html}</div>`, (src) => src)
     parsedDoc.current = next
@@ -139,7 +177,7 @@ export function SimpleEditor(props: {
   }
 
   const heading = (level: HeadingLevel) => {
-    surface.current?.focus()
+    focusSurface()
     run('formatBlock', level === 0 ? '<p>' : `<h${level}>`)
     emitChange()
     setTick((n) => n + 1)
@@ -160,7 +198,7 @@ export function SimpleEditor(props: {
   }
 
   const cmd = (command: string) => {
-    surface.current?.focus()
+    focusSurface()
     run(command)
     emitChange()
     setTick((n) => n + 1)
@@ -209,7 +247,7 @@ export function SimpleEditor(props: {
                   range.collapse(true)
                   window.getSelection()?.removeAllRanges()
                   window.getSelection()?.addRange(range)
-                  surface.current?.focus()
+                  focusSurface()
                   setShowOutline(false)
                 }}
               >
@@ -223,8 +261,10 @@ export function SimpleEditor(props: {
             onFind={(search) => findInRoot(surface.current, search, true)}
             onFindNext={(search) => findInRoot(surface.current, search, false)}
             onReplace={(search, replacement) => {
+              if (!search) return
+              focusSurface()
               const sel = window.getSelection()
-              if (sel && sel.toString() === search) {
+              if (sel && surface.current?.contains(sel.anchorNode) && sel.toString() === search) {
                 run('insertText', replacement)
                 emitChange()
                 return
@@ -237,11 +277,18 @@ export function SimpleEditor(props: {
             onReplaceAll={(search, replacement) => {
               const { doc, count } = replaceAllInDoc(currentDoc(), search, replacement)
               const el = surface.current
-              if (el) {
-                el.innerHTML = toInnerHtml(doc)
-                markBlankBlocks(el)
-              }
-              props.onChange(doc)
+              if (!el || !count) return count
+              const scroll = document.scrollingElement?.scrollTop ?? 0
+              focusSurface()
+              const range = document.createRange()
+              range.selectNodeContents(el)
+              const sel = window.getSelection()
+              sel?.removeAllRanges()
+              sel?.addRange(range)
+              // Keep this operation on the browser's native undo stack.
+              run('insertHTML', toInnerHtml(doc))
+              emitChange()
+              if (document.scrollingElement) document.scrollingElement.scrollTop = scroll
               return count
             }}
             onReplaceBook={props.onReplaceBook}
@@ -254,6 +301,11 @@ export function SimpleEditor(props: {
         contentEditable
         suppressContentEditableWarning
         spellCheck={false}
+        role="textbox"
+        aria-label="章节正文"
+        aria-multiline="true"
+        onCompositionStart={() => { composing.current = true }}
+        onCompositionEnd={() => { composing.current = false; emitChange() }}
         onInput={emitChange}
         onPaste={(e) => {
           e.preventDefault()

@@ -46,7 +46,7 @@ describe('keyboardPadding', () => {
     ).toBe(348)
   })
 
-  it('reserves space when focused but the overlay is unreported', () => {
+  it('does not invent a keyboard just because a desktop editor is focused', () => {
     expect(
       keyboardPadding({
         innerHeight: 800,
@@ -55,7 +55,7 @@ describe('keyboardPadding', () => {
         virtualKeyboardHeight: 0,
         focused: true,
       }),
-    ).toBe(360)
+    ).toBe(0)
   })
 
   it('only adds a small pad when the layout viewport already shrank', () => {

@@ -179,3 +179,29 @@ export async function restoreDump(dump: TrashDump): Promise<void> {
   for (const doc of dump.docs) await putDoc(dump.book.id, doc.chapterId, doc.doc)
   for (const blob of dump.blobs) await putBlob(dump.book.id, blob.id, blob.data, blob.mime)
 }
+
+// Read-modify-write and document updates share one transaction. A progress write
+// must never put an old snapshot of the chapter index back over a completed edit.
+export async function updateBookWithDocs(
+  id: string,
+  update: (book: BookRecord) => BookRecord,
+  docs: { chapterId: string; doc: TiptapDoc }[] = [],
+): Promise<BookRecord> {
+  const tx = (await db()).transaction(['books', 'docs'], 'readwrite')
+  const book = await tx.objectStore('books').get(id)
+  if (!book) {
+    await tx.done
+    throw new Error('找不到这本书')
+  }
+  try {
+    const next = update(book)
+    for (const row of docs) await tx.objectStore('docs').put({ key: `${id}::${row.chapterId}`, doc: row.doc })
+    await tx.objectStore('books').put(next)
+    await tx.done
+    return next
+  } catch (err) {
+    try { tx.abort() } catch { /* The transaction may already be aborted. */ }
+    await tx.done.catch(() => undefined)
+    throw err
+  }
+}
