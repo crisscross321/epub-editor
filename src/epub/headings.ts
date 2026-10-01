@@ -113,3 +113,10 @@ export function ensureLeadingH1(doc: TiptapDoc, title: string): TiptapDoc {
   if (!name) return withoutLeadingH1(doc)
   return withChapterHeading(doc, name)
 }
+
+/** The absorbed chapter's title is no longer a chapter break. */
+export function demoteMergedChapterTitle(nodes: TiptapNode[]): TiptapNode[] {
+  const first = nodes[0]
+  if (!isH1(first)) return nodes
+  return [{ ...first, attrs: { ...first.attrs, level: 2 } }, ...nodes.slice(1)]
+}

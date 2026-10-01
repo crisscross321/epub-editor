@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { displayChapterName } from '../../epub/headings'
 import { bookOutline, canMoveChapter, chineseNumber, kindOf, partWordOf, type PartGroup } from '../../epub/parts'
 import { initialCollapsed, loadPartFold, savePartFold } from '../../storage/partFold'
@@ -23,6 +23,59 @@ function blockTextSelection(event: Event) {
   const field = el?.closest('input:not([type="checkbox"]), textarea')
   if (field && document.activeElement === field) return
   event.preventDefault()
+}
+
+function DraftField(props: {
+  value: string
+  onChange: (value: string) => void
+  onBlur?: () => void
+  multiline?: boolean
+  rows?: number
+  autoFocus?: boolean
+  placeholder?: string
+  label?: string
+}) {
+  const [draft, setDraft] = useState(props.value)
+  const focused = useRef(false)
+  useEffect(() => {
+    if (!focused.current) setDraft(props.value)
+  }, [props.value])
+  const onChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setDraft(event.target.value)
+    props.onChange(event.target.value)
+  }
+  const onFocus = () => {
+    focused.current = true
+  }
+  const onBlur = () => {
+    focused.current = false
+    props.onBlur?.()
+  }
+  if (props.multiline) {
+    return (
+      <textarea
+        rows={props.rows}
+        value={draft}
+        placeholder={props.placeholder}
+        aria-label={props.label}
+        autoFocus={props.autoFocus}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onChange={onChange}
+      />
+    )
+  }
+  return (
+    <input
+      value={draft}
+      placeholder={props.placeholder}
+      aria-label={props.label}
+      autoFocus={props.autoFocus}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onChange={onChange}
+    />
+  )
 }
 
 function rangeText(group: PartGroup): string {
@@ -242,13 +295,13 @@ export function ChapterListScreen(props: {
             </button>
           )}
           {editingThisTitle ? (
-            <input
+            <DraftField
               value={name}
-              aria-label="章节名"
+              label="章节名"
               placeholder={namePlaceholder}
               autoFocus
               onBlur={() => setEditingTitle((current) => (current === ch.id ? null : current))}
-              onChange={(e) => props.onRenameChapter(ch.id, e.target.value)}
+              onChange={(title) => props.onRenameChapter(ch.id, title)}
             />
           ) : (
             <button
@@ -354,11 +407,11 @@ export function ChapterListScreen(props: {
         </div>
         {editing && !selecting ? (
           <div className="part-editor">
-            <input
+            <DraftField
               value={part.title}
-              aria-label={`${word}名`}
+              label={`${word}名`}
               placeholder={`${word}名（可不填）`}
-              onChange={(e) => props.onRenamePart(part.id, e.target.value)}
+              onChange={(title) => props.onRenamePart(part.id, title)}
             />
             <button
               className="btn btn-line btn-compact"
@@ -391,18 +444,19 @@ export function ChapterListScreen(props: {
             <div className="book-head-fields">
               <div className="field field-inline">
                 <label>书名</label>
-                <input value={props.book.title} onChange={(e) => props.onMeta({ title: e.target.value })} />
+                <DraftField value={props.book.title} onChange={(title) => props.onMeta({ title })} />
               </div>
               <div className="field field-inline">
                 <label>作者</label>
-                <input value={props.book.author} onChange={(e) => props.onMeta({ author: e.target.value })} />
+                <DraftField value={props.book.author} onChange={(author) => props.onMeta({ author })} />
               </div>
               <div className="field field-inline field-abstract">
                 <label>摘要</label>
-                <textarea
+                <DraftField
+                  multiline
                   rows={2}
                   value={props.book.description ?? ''}
-                  onChange={(e) => props.onMeta({ description: e.target.value })}
+                  onChange={(description) => props.onMeta({ description })}
                 />
               </div>
             </div>

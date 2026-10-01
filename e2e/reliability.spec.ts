@@ -140,9 +140,19 @@ test('whole-chapter replacement participates in native undo', async ({ page }) =
   await page.getByPlaceholder('替换为', { exact: true }).fill('可以撤销')
   await page.getByRole('button', { name: '全部替换', exact: true }).click()
   await expect(page.locator('.ProseMirror')).toContainText('可以撤销')
+  expect(await page.locator('.ProseMirror h1 p').count()).toBe(0)
+  await expect(page.locator('.ProseMirror > h1').first()).toHaveText('审查章节5')
+  const [bodySize, titleSize] = await page.locator('.ProseMirror').evaluate((el) => {
+    const body = el.querySelector(':scope > p')
+    const title = el.querySelector(':scope > h1')
+    return [getComputedStyle(body!).fontSize, getComputedStyle(title!).fontSize]
+  })
+  expect(bodySize).not.toBe(titleSize)
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   await expect(page.locator('.ProseMirror')).toContainText('流水悠悠')
   await expect(page.locator('.ProseMirror')).not.toContainText('可以撤销')
+  await expect(page.locator('.ProseMirror > h1').first()).toHaveText('审查章节5')
+  expect(await page.locator('.ProseMirror > p').count()).toBeGreaterThan(0)
 })
 
 test('failed persistence keeps the editor and offers retry instead of navigating away', async ({ page }) => {

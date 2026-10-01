@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import * as books from './bookService'
+import { wouldSplitByH1 } from '../epub/headings'
 import { sortChapters } from '../epub/parts'
 import type { BookRecord, TiptapDoc } from '../types/book'
 
@@ -41,6 +42,20 @@ describe('parts in the book service', () => {
     const doc: TiptapDoc = { type: 'doc', content: [h1('出发'), p('甲'), h1('尾声'), p('乙')] }
     const result = await books.saveDoc(book.id, first!.id, doc, { splitOnH1: true })
     expect(layout(result.book)).toBe('楔子:-* 出发:0 尾声:0* 抵达:0 ·:0 回程:1')
+  })
+
+  it('demotes the later chapter title to h2 when merging', async () => {
+    const book = await bookWithTwoParts()
+    const sorted = sortChapters(book.chapters)
+    const earlier = sorted[1]!
+    const later = sorted[2]!
+    await books.saveDoc(book.id, earlier.id, { type: 'doc', content: [h1(earlier.title), p('启程。')] })
+    await books.saveDoc(book.id, later.id, { type: 'doc', content: [h1(later.title), p('到了。')] })
+    const merged = await books.mergeChapters(book.id, earlier.id, later.id)
+    const doc = (await books.getDoc(merged.id, earlier.id))!
+    expect(doc.content?.filter((node) => node.type === 'heading').map((node) => node.attrs?.level)).toEqual([1, 2])
+    expect(JSON.stringify(doc)).toContain(later.title)
+    expect(wouldSplitByH1(doc)).toBe(false)
   })
 
   it('refuses to merge across volumes', async () => {

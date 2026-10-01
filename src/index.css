@@ -1481,8 +1481,7 @@ textarea {
 }
 
 .format-pop,
-.findbar,
-.outline-pop {
+.findbar {
   padding: 8px 12px 10px;
   background: var(--bar);
   border-bottom: 1px solid var(--rule);
@@ -1537,18 +1536,40 @@ textarea {
 }
 
 .outline-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 12px;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 40vh;
+  width: min(280px, 70vw);
+  max-height: min(60vh, 420px);
+  margin: 0;
+  padding: 6px;
   overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bar);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px var(--shadow), 0 0 0 1px var(--rule);
 }
 
 .outline-pop button {
-  min-height: 40px;
+  min-height: 36px;
   text-align: left;
-  padding: 0 10px;
+  padding: 6px 10px 6px calc(10px + (var(--outline-level, 1) - 1) * 14px);
   border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outline-empty {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink-soft);
 }
 
 .ProseMirror {

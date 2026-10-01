@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  demoteMergedChapterTitle,
   ensureLeadingH1,
   exportChapterHeading,
   splitDocByH1,
@@ -56,6 +57,30 @@ describe('ensureLeadingH1', () => {
     const synced = ensureLeadingH1(sample, '')
     expect(synced.content?.[0]?.type).toBe('paragraph')
     expect(JSON.stringify(synced)).not.toContain('旧名')
+  })
+})
+
+describe('demoteMergedChapterTitle', () => {
+  it('turns only the leading chapter title into h2', () => {
+    const nodes = demoteMergedChapterTitle([
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '抵达' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: '到了。' }] },
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '另一处' }] },
+      { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '白塔' }] },
+    ])
+    expect(nodes.map((node) => node.attrs?.level)).toEqual([2, undefined, 1, 2])
+    expect(wouldSplitByH1({ type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '出发' }] },
+      ...nodes,
+    ] })).toBe(true)
+    expect(wouldSplitByH1({
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '出发' }] },
+        nodes[0]!,
+        nodes[1]!,
+      ],
+    })).toBe(false)
   })
 })
 

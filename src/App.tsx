@@ -768,7 +768,7 @@ export default function App() {
             setSelected(next)
           }}
           onClearSelect={() => setSelected(new Set())}
-          onMeta={(patch) => void books.saveBook({ ...book, ...patch }).then(setBook).catch(fail)}
+          onMeta={(patch) => void books.updateBookMeta(book.id, patch).then(setBook).catch(fail)}
           onCover={async () => {
             const file = await pickImageFile()
             if (!file) return

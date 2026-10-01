@@ -201,6 +201,50 @@ function click(el: Element | null | undefined) {
   })
 }
 
+describe('ChapterListScreen title caret', () => {
+  function type(input: HTMLInputElement, value: string, caret: number) {
+    act(() => {
+      input.focus()
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
+      input.setSelectionRange(caret, caret)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  it('keeps the book-title caret when a stale save arrives', () => {
+    const onMeta = vi.fn()
+    const container = render(screen({ onMeta }))
+    const input = container.querySelector('.book-head-fields input') as HTMLInputElement
+    type(input, '边城记', 2)
+    expect(onMeta).toHaveBeenCalledWith({ title: '边城记' })
+    expect(input.selectionStart).toBe(2)
+    act(() => {
+      roots.at(-1)!.root.render(screen({ onMeta, book: { ...book, title: '边' } }))
+    })
+    expect(input.value).toBe('边城记')
+    expect(input.selectionStart).toBe(2)
+  })
+
+  it('keeps the chapter-name caret when a stale save arrives', () => {
+    const onRenameChapter = vi.fn()
+    const container = render(screen({ onRenameChapter }))
+    act(() => {
+      ;(container.querySelector('#chapter-ch1 .chapter-name') as HTMLElement).click()
+    })
+    const input = container.querySelector('#chapter-ch1 input[aria-label="章节名"]') as HTMLInputElement
+    type(input, '茶边峒', 2)
+    expect(onRenameChapter).toHaveBeenCalledWith('ch1', '茶边峒')
+    act(() => {
+      roots.at(-1)!.root.render(screen({
+        onRenameChapter,
+        book: { ...book, chapters: book.chapters.map((ch) => (ch.id === 'ch1' ? { ...ch, title: '茶' } : ch)) },
+      }))
+    })
+    expect(input.value).toBe('茶边峒')
+    expect(input.selectionStart).toBe(2)
+  })
+})
+
 describe('ChapterListScreen parts', () => {
   beforeEach(() => localStorage.clear())
 

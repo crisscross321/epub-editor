@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { findInRoot } from '../../editor/find'
 import { simplifyXhtml } from '../../epub/simplify'
 import { parseHtml } from '../../epub/xml'
@@ -9,6 +9,8 @@ import type { TiptapDoc } from '../../types/book'
 import { htmlFromPaste } from '../../editor/paste'
 import { countChars, textFromDoc } from '../../content/text'
 import { outlineFromDoc } from '../../editor/outline'
+import { replaceEditorHtml } from '../../editor/replaceHtml'
+import { excludeChapterTitleFromSelectAll, selectEditorExceptChapterTitle } from '../../editor/selectAll'
 import { markBlankBlocks } from '../blankLines'
 import { EditorToolbar, type FormatKind, type HeadingLevel } from '../EditorToolbar'
 import { FindReplaceBar } from '../FindReplaceBar'
@@ -51,6 +53,7 @@ export function SimpleEditor(props: {
   const parsedDoc = useRef<TiptapDoc>(props.doc)
   const selectionRef = useRef<Range | null>(null)
   const composing = useRef(false)
+  const preserveFullSelection = useRef(false)
   const wordTimer = useRef<number | null>(null)
   const [showFind, setShowFind] = useState(false)
   const [showOutline, setShowOutline] = useState(false)
@@ -86,14 +89,35 @@ export function SimpleEditor(props: {
   }, [props.doc])
 
   useEffect(() => {
-    const remember = () => {
+    let frame = 0
+    let later = 0
+    const rememberRange = () => {
       const sel = window.getSelection()
       if (sel?.rangeCount && surface.current?.contains(sel.anchorNode) && surface.current.contains(sel.focusNode)) {
         selectionRef.current = sel.getRangeAt(0).cloneRange()
       }
     }
+    const excludeTitle = () => {
+      const el = surface.current
+      if (!el || preserveFullSelection.current) return
+      if (excludeChapterTitleFromSelectAll(el)) rememberRange()
+    }
+    const remember = () => {
+      excludeTitle()
+      const sel = window.getSelection()
+      // Android applies select-all again after the first selectionchange.
+      if (sel && !sel.isCollapsed) {
+        cancelAnimationFrame(frame)
+        window.clearTimeout(later)
+        frame = requestAnimationFrame(excludeTitle)
+        later = window.setTimeout(excludeTitle, 40)
+      }
+      rememberRange()
+    }
     document.addEventListener('selectionchange', remember)
     return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(later)
       document.removeEventListener('selectionchange', remember)
       if (wordTimer.current) window.clearTimeout(wordTimer.current)
     }
@@ -132,6 +156,24 @@ export function SimpleEditor(props: {
     emitChange()
     props.onImageConsumed()
   }, [props.pendingImage])
+
+  useEffect(() => {
+    if (!showOutline) return
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element) || target.closest('.editor-chrome')) return
+      setShowOutline(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowOutline(false)
+    }
+    window.addEventListener('pointerdown', onPointer)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onPointer)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [showOutline])
 
   useEffect(() => {
     if (!picked) return
@@ -208,6 +250,7 @@ export function SimpleEditor(props: {
     const html = surface.current?.innerHTML || '<p></p>'
     return simplifyXhtml(`<div>${html}</div>`, (src) => src)
   }
+  const outlineItems = showOutline ? outlineFromDoc(currentDoc()) : []
 
   return (
     <>
@@ -233,11 +276,13 @@ export function SimpleEditor(props: {
         wordCount={wordCount}
       >
         {showOutline ? (
-          <div className="outline-pop">
-            {outlineFromDoc(currentDoc()).map((item) => (
+          <div className="outline-pop" role="navigation" aria-label="大纲">
+            {outlineItems.length === 0 ? <p className="outline-empty">这一章还没有标题</p> : null}
+            {outlineItems.map((item) => (
               <button
                 key={`${item.index}-${item.title}`}
                 type="button"
+                style={{ '--outline-level': String(item.level) } as CSSProperties}
                 onClick={() => {
                   const block = surface.current?.children[item.index]
                   if (!(block instanceof HTMLElement)) return
@@ -279,17 +324,19 @@ export function SimpleEditor(props: {
               const el = surface.current
               if (!el || !count) return count
               const scroll = document.scrollingElement?.scrollTop ?? 0
-              focusSurface()
-              const range = document.createRange()
-              range.selectNodeContents(el)
-              const sel = window.getSelection()
-              sel?.removeAllRanges()
-              sel?.addRange(range)
-              // Keep this operation on the browser's native undo stack.
-              run('insertHTML', toInnerHtml(doc))
-              emitChange()
-              if (document.scrollingElement) document.scrollingElement.scrollTop = scroll
-              return count
+              preserveFullSelection.current = true
+              try {
+                focusSurface()
+                // One native undo step, without letting Chrome fold paragraphs into the chapter title.
+                replaceEditorHtml(el, toInnerHtml(doc))
+                emitChange()
+                if (document.scrollingElement) document.scrollingElement.scrollTop = scroll
+                return count
+              } finally {
+                window.setTimeout(() => {
+                  preserveFullSelection.current = false
+                }, 0)
+              }
             }}
             onReplaceBook={props.onReplaceBook}
           />
@@ -307,6 +354,11 @@ export function SimpleEditor(props: {
         onCompositionStart={() => { composing.current = true }}
         onCompositionEnd={() => { composing.current = false; emitChange() }}
         onInput={emitChange}
+        onKeyDown={(e) => {
+          if (e.altKey || e.shiftKey || e.key.toLowerCase() !== 'a' || !(e.metaKey || e.ctrlKey)) return
+          e.preventDefault()
+          if (surface.current) selectEditorExceptChapterTitle(surface.current)
+        }}
         onPaste={(e) => {
           e.preventDefault()
           const html = htmlFromPaste(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'))

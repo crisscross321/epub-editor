@@ -8,6 +8,7 @@ import { parseEpub } from '../epub/parse'
 import { dirname, extname, joinPath } from '../epub/paths'
 import { docToXhtml, imageHrefFor, packEpub, rewriteImageSrcs } from '../epub/serialize'
 import {
+  demoteMergedChapterTitle,
   displayChapterName,
   ensureLeadingH1,
   exportChapterHeading,
@@ -333,10 +334,22 @@ export async function insertChapter(bookId: string, afterId: string): Promise<Bo
   return saveBook(insertChapters(book, afterId, [chapter]))
 }
 
+export async function updateBookMeta(
+  bookId: string,
+  patch: { title?: string; author?: string; description?: string },
+): Promise<BookRecord> {
+  return enqueueByKey(bookId, async () => {
+    const book = await getBook(bookId)
+    return saveBook({ ...book, ...patch })
+  })
+}
+
 export async function renameChapter(bookId: string, chapterId: string, title: string): Promise<BookRecord> {
-  const book = await getBook(bookId)
-  const chapters = book.chapters.map((ch) => (ch.id === chapterId ? { ...ch, title: title.trim() } : ch))
-  return saveBook({ ...book, chapters })
+  return enqueueByKey(bookId, async () => {
+    const book = await getBook(bookId)
+    const chapters = book.chapters.map((ch) => (ch.id === chapterId ? { ...ch, title: title.trim() } : ch))
+    return saveBook({ ...book, chapters })
+  })
 }
 
 export async function addChapter(bookId: string): Promise<BookRecord> {
@@ -371,7 +384,7 @@ export async function startPart(bookId: string, chapterId: string): Promise<{ bo
 }
 
 export async function renamePart(bookId: string, partId: string, title: string): Promise<BookRecord> {
-  return saveBook(renamePartIn(await getBook(bookId), partId, title))
+  return enqueueByKey(bookId, async () => saveBook(renamePartIn(await getBook(bookId), partId, title)))
 }
 
 export async function dissolvePart(bookId: string, partId: string): Promise<BookRecord> {
@@ -672,7 +685,7 @@ export async function mergeChapters(bookId: string, firstId: string, secondId: s
   }
   const merged: TiptapDoc = {
     type: 'doc',
-    content: [...(keepDoc.content ?? []), ...(dropDoc.content ?? [])],
+    content: [...(keepDoc.content ?? []), ...demoteMergedChapterTitle(dropDoc.content ?? [])],
   }
   await db.putDoc(bookId, keep.id, merged)
   return deleteChapter(bookId, drop.id)

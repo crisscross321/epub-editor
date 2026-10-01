@@ -65,6 +65,50 @@ describe('EditorScreen', () => {
     expect(surface?.textContent).toContain('近水人家')
   })
 
+  it('drops the chapter title when select-all starts on its first character', () => {
+    const container = render(screen())
+    const surface = container.querySelector('.ProseMirror') as HTMLElement
+    const first = surface.querySelector('h1')!.firstChild!
+    const last = surface.querySelector('h2')!.firstChild!
+    const range = document.createRange()
+    range.setStart(first, 0)
+    range.setEnd(last, last.textContent!.length)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    const text = selection.toString()
+    expect(text).toContain('近水人家')
+    expect(text).toContain('白塔')
+    expect(text).not.toContain('茶峒')
+  })
+
+  it('selects the body and later headings, not the chapter title', () => {
+    const container = render(screen())
+    const surface = container.querySelector('.ProseMirror') as HTMLElement
+    const event = new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true })
+    act(() => {
+      surface.dispatchEvent(event)
+    })
+    expect(event.defaultPrevented).toBe(true)
+    const text = window.getSelection()?.toString() ?? ''
+    expect(text).toContain('近水人家')
+    expect(text).toContain('白塔')
+    expect(text).not.toContain('茶峒')
+  })
+
+  it('opens the outline as a side panel', () => {
+    const container = render(screen())
+    act(() => {
+      button(container, '大纲')?.click()
+    })
+    const panel = container.querySelector('.outline-pop')
+    expect(panel?.getAttribute('aria-label')).toBe('大纲')
+    expect(panel?.textContent).toContain('白塔')
+  })
+
   it('jumps to a heading from the outline', () => {
     const container = render(screen())
     const surface = container.querySelector('.ProseMirror') as HTMLElement
