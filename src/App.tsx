@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { BookRecord, ChapterDump, TiptapDoc } from './types/book'
 import * as books from './app/bookService'
 import { editorBackRoute, neighborChapterIds, previewBackTarget, type Route } from './app/nav'
-import { needsBackupReminder } from './app/progress'
+import { isBackupReminderDismissed, needsBackupReminder } from './app/progress'
 import { filterBooks, sortBooks } from './app/sortBooks'
 import { toArrayBuffer } from './epub/bytes'
 import { wouldSplitByH1 } from './epub/headings'
@@ -60,7 +60,6 @@ export default function App() {
     | { kind: 'chapter'; dump: ChapterDump; title: string }
     | null
   >(null)
-  const [persistStatus, setPersistStatus] = useState<'granted' | 'denied' | 'unsupported' | 'unknown'>('unknown')
   const [trashMeta, setTrashMeta] = useState({ count: 0, bytes: 0 })
   const [confirm, setConfirm] = useState<null | {
     title: string
@@ -259,20 +258,10 @@ export default function App() {
   flushEditorRef.current = flushEditor
 
   useEffect(() => {
-    let cancelled = false
-    void requestPersistentStorage().then((status) => {
-      if (cancelled) return
-      setPersistStatus(status)
-      if (status === 'denied') {
-        setNotice({ kind: 'err', text: '系统未允许持久保存。请尽快把书导出到手机目录，以免被清理。' })
-      }
-    })
+    void requestPersistentStorage()
     void books.purgeExpiredTrash().then((count) => {
       if (count) void loadTrashMeta()
     })
-    return () => {
-      cancelled = true
-    }
   }, [loadTrashMeta])
 
   const flushProgress = async () => {
@@ -604,9 +593,36 @@ export default function App() {
     return a.starred ? -1 : 1
   })
   const continueBook = [...list].sort((a, b) => (b.lastReadAt || '').localeCompare(a.lastReadAt || ''))[0]
-  const backupCount = list.filter((item) =>
+  const booksDueForExport = list.filter((item) =>
     needsBackupReminder({ updatedAt: item.updatedAt, lastExportedAt: item.lastExportedAt, days: settings.backupDays }),
-  ).length
+  )
+  const backupCount = isBackupReminderDismissed({
+    dismissedAt: settings.backupReminderDismissedAt,
+    days: settings.backupDays,
+  })
+    ? 0
+    : booksDueForExport.length
+
+  const exportDueBooks = async () => {
+    const due = list.filter((item) =>
+      needsBackupReminder({ updatedAt: item.updatedAt, lastExportedAt: item.lastExportedAt, days: settings.backupDays }),
+    )
+    if (due.length === 0) return
+    try {
+      setBusy(true)
+      for (const item of due) {
+        const bytes = await books.exportEpub(item.id)
+        await writeBytesToLibrary(item.title || '未命名', bytes, 'epub')
+        await books.markExported(item.id)
+      }
+      await refreshShelf()
+      setNotice({ kind: 'ok', text: `已把 ${due.length} 本 EPUB 写到「文档/素笺」。` })
+    } catch (err) {
+      fail(err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const editorChapter =
     route.name === 'editor' && book
@@ -687,6 +703,8 @@ export default function App() {
           query={query}
           continueBook={continueBook?.lastReadAt ? continueBook : undefined}
           backupCount={backupCount}
+          onExportDue={() => void exportDueBooks()}
+          onDismissBackup={() => patchSettings({ backupReminderDismissedAt: new Date().toISOString() })}
           undoLabel={undo?.kind === 'books' ? undo.title : undefined}
           onQuery={setQuery}
           onSort={(shelfSort) => patchSettings({ shelfSort })}
@@ -880,7 +898,6 @@ export default function App() {
         <SettingsScreen
           settings={settings}
           onChange={patchSettings}
-          persistStatus={persistStatus}
           trashCount={trashMeta.count}
           trashBytes={trashMeta.bytes}
           onEmptyTrash={() =>

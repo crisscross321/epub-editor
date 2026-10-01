@@ -5,16 +5,33 @@ export function readingPercent(chapterIndex: number, chapterCount: number, offse
   return Math.min(100, Math.max(0, Math.round(raw)))
 }
 
+const DAY_MS = 86_400_000
+
 export function needsBackupReminder(input: {
   updatedAt: string
   lastExportedAt?: string
   now?: number
   days?: number
 }): boolean {
+  const updated = Date.parse(input.updatedAt)
+  if (Number.isNaN(updated)) return false
+  if (input.lastExportedAt && updated <= Date.parse(input.lastExportedAt)) return false
   const days = input.days ?? 3
   const now = input.now ?? Date.now()
-  if (!input.lastExportedAt) return now - Date.parse(input.updatedAt) >= days * 86_400_000
-  return Date.parse(input.updatedAt) > Date.parse(input.lastExportedAt)
+  return now - updated >= days * DAY_MS
+}
+
+export function isBackupReminderDismissed(input: {
+  dismissedAt?: string
+  now?: number
+  days?: number
+}): boolean {
+  if (!input.dismissedAt) return false
+  const dismissed = Date.parse(input.dismissedAt)
+  if (Number.isNaN(dismissed)) return false
+  const days = input.days ?? 3
+  const now = input.now ?? Date.now()
+  return now - dismissed < days * DAY_MS
 }
 
 export function coverHue(title: string): number {

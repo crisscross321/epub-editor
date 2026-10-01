@@ -33,6 +33,8 @@ export function BookshelfScreen(props: {
   query: string
   continueBook?: BookRecord
   backupCount: number
+  onExportDue?: () => void
+  onDismissBackup?: () => void
   undoLabel?: string
   onQuery: (q: string) => void
   onSort: (sort: ShelfSort) => void
@@ -106,8 +108,20 @@ export function BookshelfScreen(props: {
       ) : null}
 
       {props.backupCount > 0 ? (
-        <div className="banner">
+        <div className="banner banner-note">
           <span>{props.backupCount} 本书改过还没导出。卸载应用会丢掉书架，导出才是备份。</span>
+          <span className="banner-actions">
+            {props.onExportDue ? (
+              <button type="button" onClick={props.onExportDue}>
+                去导出
+              </button>
+            ) : null}
+            {props.onDismissBackup ? (
+              <button type="button" onClick={props.onDismissBackup}>
+                关闭
+              </button>
+            ) : null}
+          </span>
         </div>
       ) : null}
 

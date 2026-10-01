@@ -15,6 +15,7 @@ export interface AppSettings {
   shelfView: ShelfView
   shelfSort: ShelfSort
   backupDays: number
+  backupReminderDismissedAt?: string
   onboardingDone: boolean
 }
 

@@ -112,6 +112,24 @@ describe('BookshelfScreen grid multi-select', () => {
   })
 })
 
+describe('BookshelfScreen backup reminder', () => {
+  it('offers export and dismiss without using the error banner', () => {
+    const onExportDue = vi.fn()
+    const onDismissBackup = vi.fn()
+    const container = render(shelf({ backupCount: 2, onExportDue, onDismissBackup }))
+    const note = container.querySelector('.banner-note')
+    expect(note?.textContent).toContain('2 本书改过还没导出')
+    expect(note?.classList.contains('banner-note')).toBe(true)
+    expect(container.querySelector('.banner:not(.banner-note)')).toBeNull()
+    act(() => {
+      ;[...container.querySelectorAll('button')].find((btn) => btn.textContent === '去导出')?.click()
+      ;[...container.querySelectorAll('button')].find((btn) => btn.textContent === '关闭')?.click()
+    })
+    expect(onExportDue).toHaveBeenCalledOnce()
+    expect(onDismissBackup).toHaveBeenCalledOnce()
+  })
+})
+
 describe('BookshelfScreen chrome', () => {
   it('shows a search icon beside the query field', () => {
     const container = render(shelf())

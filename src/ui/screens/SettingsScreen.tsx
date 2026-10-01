@@ -1,11 +1,33 @@
+import { useState } from 'react'
 import { formatBytes } from '../../storage/persist'
 import type { AppSettings } from '../../storage/settings'
 import { Segmented } from '../chrome'
 
+function BackupDaysInput(props: { days: number; onChange: (days: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      enterKeyHint="done"
+      autoComplete="off"
+      aria-label="超过几天未导出就提醒"
+      maxLength={2}
+      value={draft ?? String(props.days)}
+      onChange={(e) => {
+        const next = e.target.value.replace(/\D/g, '').slice(0, 2)
+        setDraft(next)
+        const n = Number(next)
+        if (next !== '' && n >= 1 && n <= 30) props.onChange(n)
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  )
+}
+
 export function SettingsScreen(props: {
   settings: AppSettings
   onChange: (patch: Partial<AppSettings>) => void
-  persistStatus?: 'granted' | 'denied' | 'unsupported' | 'unknown'
   trashCount?: number
   trashBytes?: number
   onEmptyTrash?: () => void
@@ -76,13 +98,9 @@ export function SettingsScreen(props: {
         <label className="field-row">
           <span>超过几天未导出就提醒</span>
           <span className="field-row-input">
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={30}
-              value={props.settings.backupDays}
-              onChange={(e) => props.onChange({ backupDays: Number(e.target.value) || 3 })}
+            <BackupDaysInput
+              days={props.settings.backupDays}
+              onChange={(backupDays) => props.onChange({ backupDays })}
             />
             天
           </span>
@@ -108,13 +126,6 @@ export function SettingsScreen(props: {
 
       <section className="settings-block">
         <h2 className="section-title">存储</h2>
-        <p className="muted">
-          {props.persistStatus === 'granted'
-            ? '系统已允许持久保存本机数据。'
-            : props.persistStatus === 'denied'
-              ? '系统未允许持久保存。请尽快导出，以免被清理。'
-              : '正在向系统申请持久保存。'}
-        </p>
         <div className="field-row">
           <span>
             回收站 {props.trashCount ?? 0} 本 · 约 {formatBytes(props.trashBytes ?? 0)}

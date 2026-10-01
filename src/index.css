@@ -386,6 +386,22 @@ textarea {
   color: var(--ok);
 }
 
+.banner-note {
+  flex-wrap: wrap;
+  background: var(--fill);
+  color: var(--ink);
+}
+
+.banner-note > span:first-child {
+  flex: 1 1 100%;
+}
+
+.banner > .banner-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
 .app > .banner {
   margin: 12px 16px 0;
 }

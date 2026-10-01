@@ -38,4 +38,47 @@ describe('SettingsScreen', () => {
     expect(container.textContent).toContain('存储')
     expect(container.textContent).toContain('回收站')
   })
+
+  it('lets the backup-day field be cleared before a new number is typed', () => {
+    let days = 3
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const draw = () => {
+      act(() => {
+        root.render(
+          <SettingsScreen
+            settings={{ ...defaultSettings, backupDays: days }}
+            onChange={(patch) => {
+              if (patch.backupDays != null) days = patch.backupDays
+            }}
+          />,
+        )
+      })
+    }
+    roots.push({ root, container })
+    draw()
+    const input = container.querySelector('input[aria-label="超过几天未导出就提醒"]') as HTMLInputElement
+    const setValue = (value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter?.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    act(() => setValue(''))
+    expect(input.value).toBe('')
+    expect(days).toBe(3)
+    act(() => {
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    })
+    expect(input.value).toBe('3')
+    act(() => setValue(''))
+    act(() => setValue('7'))
+    expect(input.value).toBe('7')
+    expect(days).toBe(7)
+    draw()
+    act(() => {
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    })
+    expect(input.value).toBe('7')
+  })
 })
