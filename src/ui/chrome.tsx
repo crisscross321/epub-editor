@@ -10,6 +10,7 @@ const ICONS = {
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   list: 'M4 6h16M4 12h16M4 18h16',
   chevron: 'M9 6l6 6-6 6',
+  chevronUp: 'M6 14l6-6 6 6',
 } as const
 
 export function Icon(props: { name: keyof typeof ICONS; size?: number }) {

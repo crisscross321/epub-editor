@@ -1361,13 +1361,7 @@ textarea {
 }
 
 .settings-item {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-.settings-item:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
+  padding: 12px 0 0;
 }
 
 .settings-label {
@@ -1551,31 +1545,76 @@ textarea {
   color: var(--ink-soft);
 }
 
+.app-editor {
+  --bar-h: 44px;
+}
+
+.app-editor .topbar .icon-btn {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.app-editor .topbar-title {
+  font-size: 16px;
+}
+
+.app-editor .toolbar {
+  padding: 2px 16px 2px 4px;
+}
+
+.app-editor .toolbar button {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
 .outline-pop {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 12px;
+  top: 0;
+  right: 8px;
   z-index: 6;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  width: min(280px, 70vw);
-  max-height: min(60vh, 420px);
+  width: min(220px, calc(50% - 12px));
+  max-height: min(46vh, 320px);
   margin: 0;
-  padding: 6px;
-  overflow: auto;
-  overscroll-behavior: contain;
+  padding: 4px 4px 6px 6px;
+  overflow: hidden;
   background: var(--bar);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  box-shadow: 0 10px 28px var(--shadow), 0 0 0 1px var(--rule);
+  border: 0;
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 10px 28px var(--shadow);
 }
 
-.outline-pop button {
-  min-height: 36px;
+.outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin-right: 32px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.outline-close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: var(--ink-soft);
+}
+
+.outline-list button {
+  min-height: 32px;
   text-align: left;
-  padding: 6px 10px 6px calc(10px + (var(--outline-level, 1) - 1) * 14px);
+  padding: 4px 8px 4px calc(8px + (var(--outline-level, 1) - 1) * 12px);
   border-radius: 6px;
+  font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1600,6 +1639,11 @@ textarea {
 .ProseMirror[contenteditable='true'] {
   -webkit-user-modify: read-write;
   word-wrap: break-word;
+}
+
+.ProseMirror * {
+  scroll-margin-top: calc(var(--editor-cover, var(--bar-h) + var(--safe-top)) + 16px);
+  scroll-margin-bottom: calc(var(--keyboard-inset) + 32px);
 }
 
 .ProseMirror h1,

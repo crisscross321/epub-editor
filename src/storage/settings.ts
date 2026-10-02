@@ -22,6 +22,13 @@ export interface AppSettings {
 const KEY = 'sujian.settings'
 const SIZE_PX: Record<FontSize, number> = { s: 16, m: 18, l: 22 }
 
+export const themeChoices: readonly (readonly [ThemeName, string])[] = [
+  ['paper', '纸'],
+  ['sepia', '护眼'],
+  ['night', '夜'],
+  ['system', '系统'],
+]
+
 export const defaultSettings: AppSettings = {
   theme: 'paper',
   fontFamily: 'serif',

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { TiptapDoc } from '../../types/book'
 import { EditorScreen } from './EditorScreen'
 
@@ -99,7 +99,7 @@ describe('EditorScreen', () => {
     expect(text).not.toContain('茶峒')
   })
 
-  it('opens the outline as a side panel', () => {
+  it('opens the outline in place of the toolbar', () => {
     const container = render(screen())
     act(() => {
       button(container, '大纲')?.click()
@@ -107,20 +107,37 @@ describe('EditorScreen', () => {
     const panel = container.querySelector('.outline-pop')
     expect(panel?.getAttribute('aria-label')).toBe('大纲')
     expect(panel?.textContent).toContain('白塔')
+    expect(container.querySelector('.toolbar')).toBeNull()
+    expect(container.querySelector('[aria-label="收起大纲"]')).toBeTruthy()
+    act(() => {
+      ;(container.querySelector('[aria-label="收起大纲"]') as HTMLButtonElement).click()
+    })
+    expect(container.querySelector('.outline-pop')).toBeNull()
+    expect(container.querySelector('.toolbar')).toBeTruthy()
   })
 
   it('jumps to a heading from the outline', () => {
     const container = render(screen())
     const surface = container.querySelector('.ProseMirror') as HTMLElement
-    const target = surface.children[2] as HTMLElement
-    const spy = vi.spyOn(target, 'scrollIntoView')
+    const title = surface.querySelector('h1')!
+    const start = document.createRange()
+    start.selectNodeContents(title)
+    start.collapse(true)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(start)
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'))
+    })
     act(() => {
       button(container, '大纲')?.click()
     })
     act(() => {
       button(container, '白塔')?.click()
     })
-    expect(spy).toHaveBeenCalled()
+    const heading = surface.querySelector('h2')!
+    expect(heading.contains(selection.anchorNode)).toBe(true)
+    expect(container.querySelector('.outline-pop')).toBeNull()
   })
 
   it('shows chapter navigation and split when those actions are provided', () => {

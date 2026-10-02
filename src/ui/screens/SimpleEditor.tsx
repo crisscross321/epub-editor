@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { findInRoot } from '../../editor/find'
+import { findInRoot, revealElement } from '../../editor/find'
 import { simplifyXhtml } from '../../epub/simplify'
 import { parseHtml } from '../../epub/xml'
 import { docToXhtml } from '../../epub/serialize'
@@ -12,6 +12,7 @@ import { outlineFromDoc } from '../../editor/outline'
 import { replaceEditorHtml } from '../../editor/replaceHtml'
 import { excludeChapterTitleFromSelectAll, selectEditorExceptChapterTitle } from '../../editor/selectAll'
 import { markBlankBlocks } from '../blankLines'
+import { Icon } from '../chrome'
 import { EditorToolbar, type FormatKind, type HeadingLevel } from '../EditorToolbar'
 import { FindReplaceBar } from '../FindReplaceBar'
 import { ImageFloat, imageFloatStyle } from '../ImageFloat'
@@ -73,6 +74,23 @@ export function SimpleEditor(props: {
     // A chapter switch is a new editing session; ordinary parent renders are not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.docKey])
+
+  useLayoutEffect(() => {
+    const chrome = surface.current?.parentElement?.querySelector('.editor-chrome')
+    if (!(chrome instanceof HTMLElement)) return
+    const rootStyle = document.documentElement.style
+    const sync = () => {
+      const bottom = chrome.getBoundingClientRect().bottom
+      if (bottom > 0) rootStyle.setProperty('--editor-cover', `${Math.ceil(bottom)}px`)
+    }
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(chrome)
+    return () => {
+      observer.disconnect()
+      rootStyle.removeProperty('--editor-cover')
+    }
+  }, [])
 
   useLayoutEffect(() => {
     if (props.doc === parsedDoc.current || composing.current) return
@@ -270,13 +288,25 @@ export function SimpleEditor(props: {
         showFind={showFind}
         onToggleFind={() => setShowFind((v) => !v)}
         showOutline={showOutline}
-        onToggleOutline={() => setShowOutline((v) => !v)}
+        onToggleOutline={() => setShowOutline((open) => {
+          if (!open) setShowFind(false)
+          return !open
+        })}
         onPreview={props.onPreview}
         onSplit={props.onSplit}
         wordCount={wordCount}
       >
         {showOutline ? (
-          <div className="outline-pop" role="navigation" aria-label="大纲">
+          <div
+            className="outline-pop"
+            role="navigation"
+            aria-label="大纲"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <button type="button" className="outline-close" aria-label="收起大纲" onClick={() => setShowOutline(false)}>
+              <Icon name="chevronUp" size={16} />
+            </button>
+            <div className="outline-list">
             {outlineItems.length === 0 ? <p className="outline-empty">这一章还没有标题</p> : null}
             {outlineItems.map((item) => (
               <button
@@ -284,21 +314,25 @@ export function SimpleEditor(props: {
                 type="button"
                 style={{ '--outline-level': String(item.level) } as CSSProperties}
                 onClick={() => {
-                  const block = surface.current?.children[item.index]
-                  if (!(block instanceof HTMLElement)) return
-                  block.scrollIntoView({ block: 'start' })
+                  const root = surface.current
+                  const block = root?.children[item.index]
+                  if (!root || !(block instanceof HTMLElement)) return
                   const range = document.createRange()
                   range.selectNodeContents(block)
                   range.collapse(true)
-                  window.getSelection()?.removeAllRanges()
-                  window.getSelection()?.addRange(range)
-                  focusSurface()
+                  selectionRef.current = range.cloneRange()
+                  root.focus({ preventScroll: true })
+                  const selection = window.getSelection()
+                  selection?.removeAllRanges()
+                  selection?.addRange(range)
+                  revealElement(block)
                   setShowOutline(false)
                 }}
               >
                 {item.title}
               </button>
             ))}
+            </div>
           </div>
         ) : null}
         {showFind ? (

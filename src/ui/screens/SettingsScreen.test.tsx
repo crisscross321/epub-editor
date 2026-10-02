@@ -27,14 +27,25 @@ afterEach(() => {
 })
 
 describe('SettingsScreen', () => {
-  it('labels reading options and separates setting groups', () => {
-    const container = render(<SettingsScreen settings={defaultSettings} onChange={() => {}} />)
+  it('shares color mode with the reader and leaves the rest of layout there', () => {
+    let theme = defaultSettings.theme
+    const container = render(
+      <SettingsScreen
+        settings={{ ...defaultSettings, theme }}
+        onChange={(patch) => {
+          if (patch.theme) theme = patch.theme
+        }}
+      />,
+    )
     expect(container.textContent).toContain('颜色模式')
-    expect(container.textContent).toContain('字号')
-    expect(container.textContent).toContain('字体')
-    expect(container.textContent).toContain('翻页方式')
+    expect(container.textContent).not.toContain('字号')
+    expect(container.textContent).not.toContain('字体')
+    expect(container.textContent).not.toContain('翻页方式')
     expect(container.querySelectorAll('.settings-block').length).toBe(4)
-    expect(container.querySelectorAll('.settings-item').length).toBe(4)
+    const night = [...container.querySelectorAll('button')].find((btn) => btn.textContent === '夜')
+    act(() => night?.click())
+    expect(theme).toBe('night')
+    expect(container.textContent).toContain('备份')
     expect(container.textContent).toContain('存储')
     expect(container.textContent).toContain('回收站')
   })

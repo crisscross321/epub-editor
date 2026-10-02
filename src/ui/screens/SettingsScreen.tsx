@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { formatBytes } from '../../storage/persist'
-import type { AppSettings } from '../../storage/settings'
+import { themeChoices, type AppSettings } from '../../storage/settings'
 import { Segmented } from '../chrome'
 
 function BackupDaysInput(props: { days: number; onChange: (days: number) => void }) {
@@ -38,56 +38,14 @@ export function SettingsScreen(props: {
   return (
     <div className="screen">
       <section className="settings-block">
-        <h2 className="section-title">阅读</h2>
+        <h2 className="section-title">外观</h2>
         <div className="settings-item">
           <div className="settings-label">颜色模式</div>
           <Segmented
             label="颜色模式"
             value={props.settings.theme}
-            options={[
-              ['paper', '纸'],
-              ['sepia', '护眼'],
-              ['night', '夜'],
-              ['system', '跟随系统'],
-            ]}
+            options={themeChoices}
             onChange={(theme) => props.onChange({ theme })}
-          />
-        </div>
-        <div className="settings-item">
-          <div className="settings-label">字号</div>
-          <Segmented
-            label="字号"
-            value={props.settings.fontSize}
-            options={[
-              ['s', '小字'],
-              ['m', '中字'],
-              ['l', '大字'],
-            ]}
-            onChange={(fontSize) => props.onChange({ fontSize })}
-          />
-        </div>
-        <div className="settings-item">
-          <div className="settings-label">字体</div>
-          <Segmented
-            label="字体"
-            value={props.settings.fontFamily}
-            options={[
-              ['serif', '宋体'],
-              ['sans', '黑体'],
-            ]}
-            onChange={(fontFamily) => props.onChange({ fontFamily })}
-          />
-        </div>
-        <div className="settings-item">
-          <div className="settings-label">翻页方式</div>
-          <Segmented
-            label="翻页方式"
-            value={props.settings.readMode}
-            options={[
-              ['scroll', '滚动'],
-              ['page', '翻页'],
-            ]}
-            onChange={(readMode) => props.onChange({ readMode })}
           />
         </div>
       </section>

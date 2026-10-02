@@ -68,7 +68,6 @@ function screen(overrides: Partial<Parameters<typeof PreviewScreen>[0]> = {}) {
       onBack={() => {}}
       onEdit={() => {}}
       onProgress={() => {}}
-      onOpenSettings={() => {}}
       {...overrides}
     />
   )
@@ -107,6 +106,26 @@ function swipe(target: EventTarget, fromX: number, toX: number) {
     fire('touchend', toX)
   })
 }
+
+describe('PreviewScreen reading controls', () => {
+  it('keeps layout in the reader and does not open app settings', async () => {
+    const { container } = render(screen())
+    await flush()
+    const tools = container.querySelector('.reader-tools')
+    expect(tools?.textContent).toContain('版式')
+    expect(tools?.textContent).not.toContain('设置')
+    act(() => {
+      button(container, '版式')!.click()
+    })
+    const drawer = container.querySelector('.drawer')
+    expect(drawer?.textContent).toContain('字号')
+    expect(drawer?.textContent).toContain('字体')
+    expect(drawer?.textContent).toContain('颜色')
+    expect(drawer?.textContent).toContain('行距')
+    expect(drawer?.textContent).toContain('页边距')
+    expect(drawer?.textContent).toContain('翻页方式')
+  })
+})
 
 describe('PreviewScreen chapter navigation', () => {
   it('does not switch chapters when the reader is swiped horizontally', async () => {

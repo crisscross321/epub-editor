@@ -238,10 +238,6 @@ export default function App() {
       return
     }
     if (current.name === 'settings') {
-      if (current.bookId) {
-        setRoute({ name: 'preview', bookId: current.bookId })
-        return
-      }
       void goShelf()
       return
     }
@@ -644,7 +640,7 @@ export default function App() {
   const hideTop = route.name === 'preview' || !settings.onboardingDone
 
   return (
-    <div className={route.name === 'preview' ? 'app app-preview' : 'app'}>
+    <div className={route.name === 'preview' ? 'app app-preview' : route.name === 'editor' ? 'app app-editor' : 'app'}>
       {hideTop ? null : (
         <TopBar
           onBack={route.name === 'shelf' ? undefined : goBack}
@@ -1052,7 +1048,6 @@ export default function App() {
             if (progressTimer.current) window.clearTimeout(progressTimer.current)
             progressTimer.current = window.setTimeout(() => void flushProgress(), 400)
           }}
-          onOpenSettings={() => { void flushProgress(); setRoute({ name: 'settings', bookId: book.id }) }}
         />
       ) : null}
 

@@ -38,11 +38,12 @@ export function EditorToolbar(props: {
   }, [formatOpen])
 
   useEffect(() => {
-    if (props.showFind) setFormatOpen(false)
-  }, [props.showFind])
+    if (props.showFind || props.showOutline) setFormatOpen(false)
+  }, [props.showFind, props.showOutline])
 
   return (
     <div className="editor-chrome" ref={wrap}>
+      {props.showOutline ? null : (
       <div className="toolbar" onMouseDown={(e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault() }}>
         <button type="button" className={props.headingOn(1) ? 'is-on' : ''} onClick={() => props.onHeading(1)}>
           H1
@@ -105,7 +106,8 @@ export function EditorToolbar(props: {
         ) : null}
         {typeof props.wordCount === 'number' ? <span className="wordcount">{props.wordCount} 字</span> : null}
       </div>
-      {formatOpen ? (
+      )}
+      {formatOpen && !props.showOutline ? (
         <div className="format-pop" role="menu" aria-label="特殊格式" onMouseDown={(e) => e.preventDefault()}>
           <button
             type="button"

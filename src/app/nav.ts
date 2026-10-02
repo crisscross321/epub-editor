@@ -3,7 +3,7 @@ export type Route =
   | { name: 'chapters'; bookId: string }
   | { name: 'editor'; bookId: string; chapterId: string; from?: 'preview' | 'chapters' }
   | { name: 'preview'; bookId: string; chapterId?: string; from?: 'editor' | 'chapters' }
-  | { name: 'settings'; bookId?: string }
+  | { name: 'settings' }
   | { name: 'info'; bookId: string }
 
 export function editorBackRoute(

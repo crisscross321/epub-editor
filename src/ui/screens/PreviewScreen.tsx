@@ -21,7 +21,7 @@ import {
   scrollTopForOffset,
   type ChapterRange,
 } from '../../reader/stream'
-import { fontSizePx, type AppSettings } from '../../storage/settings'
+import { fontSizePx, themeChoices, type AppSettings } from '../../storage/settings'
 import type { Annotation, BookRecord } from '../../types/book'
 import { tightenBlankHtml } from '../blankLines'
 import { Icon, Segmented } from '../chrome'
@@ -75,7 +75,6 @@ export function PreviewScreen(props: {
   onBack: () => void
   onEdit: (chapterId: string) => void
   onProgress: (chapterId: string, offset: number) => void
-  onOpenSettings: () => void
 }) {
   const bookChaptersRef = useRef(props.book.chapters)
   bookChaptersRef.current = props.book.chapters
@@ -499,9 +498,6 @@ export function PreviewScreen(props: {
                 {label}
               </button>
             ))}
-            <button type="button" onClick={props.onOpenSettings}>
-              设置
-            </button>
           </div>
         </div>
       ) : null}
@@ -751,12 +747,7 @@ export function PreviewScreen(props: {
             <Segmented
               label="颜色"
               value={props.settings.theme}
-              options={[
-                ['paper', '纸'],
-                ['sepia', '护眼'],
-                ['night', '夜'],
-                ['system', '系统'],
-              ]}
+              options={themeChoices}
               onChange={(theme) => props.onSettings({ theme })}
             />
           </div>
