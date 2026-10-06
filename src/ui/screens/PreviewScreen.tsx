@@ -1,11 +1,11 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import * as books from '../../app/bookService'
 import { readingPercent } from '../../app/progress'
-import { countChars, readingMinutes, textFromHtml } from '../../content/text'
+import { countChars, textFromHtml } from '../../content/text'
 import { bookOutline } from '../../epub/parts'
 import { shouldRenderOuterTitle } from '../../epub/plain'
 import { sanitizeHtml } from '../../epub/sanitize'
-import { outlineFromXhtml } from '../../epub/toc'
+import { outlineFromXhtml, previewHeadings } from '../../epub/toc'
 import { captureAnchor, restoreAnchor, type ReadingAnchor } from '../../reader/position'
 import { highlightQuery } from '../../reader/highlight'
 import { readerBodyCss } from '../../reader/style'
@@ -40,6 +40,12 @@ function wrapChapterDocument(bodyHtml: string, css: string): string {
 
 function escapeAttr(id: string): string {
   return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id
+}
+
+const PREVIEW_HEADING = 'h1, h2, h3, h4, h5, h6'
+
+function scrollTopForHeading(scrollTop: number, containerTop: number, elementTop: number): number {
+  return Math.max(0, scrollTop + elementTop - containerTop)
 }
 
 const PreviewChapter = memo(function PreviewChapter(props: {
@@ -104,6 +110,7 @@ export function PreviewScreen(props: {
   const [warnings, setWarnings] = useState<Record<string, string | undefined>>({})
   const [chrome, setChrome] = useState(true)
   const [panel, setPanel] = useState<'toc' | 'search' | 'notes' | 'type' | null>(null)
+  const [showOutline, setShowOutline] = useState(false)
   const [query, setQuery] = useState(props.highlight ?? '')
   const [draftQuery, setDraftQuery] = useState(props.highlight ?? '')
   const [searching, setSearching] = useState(false)
@@ -161,6 +168,8 @@ export function PreviewScreen(props: {
   const bodyHtml = (chapter && bodies[chapter.id]) || ''
   const pageHtml = bodyHtml ? wrapChapterDocument(bodyHtml, css) : ''
   const warning = chapter ? warnings[chapter.id] : undefined
+  const chapterOutline = useMemo(() => previewHeadings(bodyHtml), [bodyHtml])
+  const chapterChars = countChars(textFromHtml(bodyHtml))
 
   useEffect(() => {
     const id = props.startChapterId || props.book.readChapterId
@@ -460,10 +469,29 @@ export function PreviewScreen(props: {
 
   turnRef.current = turn
 
-  const remaining = chapter
-    ? readingMinutes(Math.round(countChars(textFromHtml(bodyHtml)) * (1 - offset)))
-    : 0
   const percent = readingPercent(index, chapters.length, offset)
+
+  const jumpToHeading = (headingIndex: number) => {
+    if (paged) {
+      const doc = frame.current?.contentDocument
+      const root = doc?.documentElement
+      const el = doc?.body?.querySelectorAll(PREVIEW_HEADING)[headingIndex]
+      if (root && el instanceof HTMLElement) {
+        root.scrollTop = scrollTopForHeading(root.scrollTop, 0, el.getBoundingClientRect().top)
+      }
+    } else {
+      const stream = streamRef.current
+      const article = chapter ? stream?.querySelector(`[data-chapter-id="${escapeAttr(chapter.id)}"]`) : null
+      const el = article?.querySelectorAll(PREVIEW_HEADING)[headingIndex]
+      if (stream && el instanceof HTMLElement) {
+        pendingJump.current = null
+        const nextTop = scrollTopForHeading(stream.scrollTop, stream.getBoundingClientRect().top, el.getBoundingClientRect().top)
+        stream.scrollTop = nextTop
+        anchorRef.current = captureAnchor(stream)
+      }
+    }
+    setShowOutline(false)
+  }
 
   if (!chapter) return <div className="empty">没有章节</div>
 
@@ -480,10 +508,32 @@ export function PreviewScreen(props: {
               编辑
             </button>
           </div>
+          {showOutline ? (
+            <div className="outline-pop" role="navigation" aria-label="大纲" onMouseDown={(e) => e.preventDefault()}>
+              <button type="button" className="outline-close" aria-label="收起大纲" onClick={() => setShowOutline(false)}>
+                <Icon name="chevronUp" size={16} />
+              </button>
+              <div className="outline-list">
+                {!bodyHtml ? <p className="outline-empty">正在加载章节…</p> : null}
+                {bodyHtml && chapterOutline.length === 0 ? <p className="outline-empty">这一章还没有标题</p> : null}
+                {chapterOutline.map((item) => (
+                  <button
+                    key={`${item.index}-${item.title}`}
+                    type="button"
+                    style={{ '--outline-level': String(item.level) } as CSSProperties}
+                    onClick={() => jumpToHeading(item.index)}
+                  >
+                    {item.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
           <div className="reader-tools">
             {(
               [
                 ['toc', '目录'],
+                ['outline', '大纲'],
                 ['search', '搜索'],
                 ['notes', '笔记'],
                 ['type', '版式'],
@@ -493,12 +543,21 @@ export function PreviewScreen(props: {
                 key={id}
                 className={panel === id ? 'is-on' : ''}
                 type="button"
-                onClick={() => setPanel(panel === id ? null : id)}
+                onClick={() => {
+                  if (id === 'outline') {
+                    setPanel(null)
+                    setShowOutline(true)
+                    return
+                  }
+                  setShowOutline(false)
+                  setPanel(panel === id ? null : id)
+                }}
               >
                 {label}
               </button>
             ))}
           </div>
+          )}
         </div>
       ) : null}
 
@@ -545,7 +604,7 @@ export function PreviewScreen(props: {
           </button>
           <span className="muted">
             {paged ? `${page + 1} / ${pages} · ` : ''}
-            {headingOf(chapter.id)} · {percent}% · 约 {remaining} 分钟
+            {headingOf(chapter.id)} · {chapterChars} 字 · {percent}%
           </span>
           <button
             className="btn btn-ghost btn-compact"

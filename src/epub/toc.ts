@@ -7,6 +7,28 @@ export interface TocHeading {
   title: string
 }
 
+export interface PreviewHeading {
+  index: number
+  level: number
+  title: string
+}
+
+const PREVIEW_HEADING = 'h1, h2, h3, h4, h5, h6'
+
+export function previewHeadings(html: string): PreviewHeading[] {
+  const doc = parseHtml(html)
+  const nodes = doc.body ? Array.from(doc.body.querySelectorAll(PREVIEW_HEADING)) : []
+  const out: PreviewHeading[] = []
+  nodes.forEach((el, index) => {
+    const title = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (!title) return
+    const level = Number(el.tagName.slice(1))
+    if (!Number.isInteger(level)) return
+    out.push({ index, level, title })
+  })
+  return out
+}
+
 export function outlineFromXhtml(xhtml: string): TocHeading[] {
   const doc = parseHtml(xhtml)
   const out: TocHeading[] = []

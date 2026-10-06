@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseHtml } from './xml'
-import { nestedNavHtml, outlineFromXhtml } from './toc'
+import { nestedNavHtml, outlineFromXhtml, previewHeadings } from './toc'
 
 describe('outlineFromXhtml', () => {
   it('collects h2 and h3 that already have ids', () => {
@@ -13,6 +13,16 @@ describe('outlineFromXhtml', () => {
     expect(headings).toEqual([
       { level: 2, id: 'h2-1', title: '节一' },
       { level: 3, id: 'h2-1-h3-1', title: '点A' },
+    ])
+  })
+})
+
+describe('previewHeadings', () => {
+  it('lists every heading in document order, including those without ids', () => {
+    expect(previewHeadings(`<h1>第 1 章 茶峒</h1><h2>白塔</h2><h3></h3><p>正文</p><h3>渡口</h3>`)).toEqual([
+      { index: 0, level: 1, title: '第 1 章 茶峒' },
+      { index: 1, level: 2, title: '白塔' },
+      { index: 3, level: 3, title: '渡口' },
     ])
   })
 })

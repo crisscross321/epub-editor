@@ -1768,10 +1768,16 @@ textarea {
 }
 
 .reader-chrome {
+  position: relative;
+  z-index: 4;
   flex-shrink: 0;
   background: var(--bar);
   border-bottom: 1px solid var(--rule);
   padding-top: var(--safe-top);
+}
+
+.reader-chrome .outline-pop {
+  top: calc(var(--safe-top) + var(--bar-h));
 }
 
 .reader-top {

@@ -14,6 +14,7 @@ vi.mock('../../app/bookService', () => ({
   removeNote: vi.fn(async () => {}),
 }))
 
+import * as books from '../../app/bookService'
 import { PreviewScreen } from './PreviewScreen'
 
 const roots: Array<{ root: Root; container: HTMLDivElement }> = []
@@ -43,6 +44,9 @@ afterEach(() => {
   })
   for (const item of roots) item.container.remove()
   roots.length = 0
+  vi.mocked(books.getChapterPreview).mockImplementation(async (_bookId: string, chapter: { title: string }) => ({
+    html: `<p>${chapter.title}</p>`,
+  }))
 })
 
 const book: BookRecord = {
@@ -124,6 +128,42 @@ describe('PreviewScreen reading controls', () => {
     expect(drawer?.textContent).toContain('行距')
     expect(drawer?.textContent).toContain('页边距')
     expect(drawer?.textContent).toContain('翻页方式')
+  })
+
+  it('shows chapter title, word count, and percent instead of remaining minutes', async () => {
+    const { container } = render(screen())
+    await flush()
+    const status = container.querySelector('.reader-bottom .muted')?.textContent ?? ''
+    expect(status).toBe('第 1 章 茶峒 · 7 字 · 0%')
+    expect(status).not.toContain('分钟')
+  })
+
+  it('opens an outline and jumps to the chosen heading', async () => {
+    vi.mocked(books.getChapterPreview).mockImplementation(async () => ({
+      html: '<h2>白塔</h2><p>近水人家</p>',
+    }))
+    const { container } = render(screen())
+    await flush()
+    act(() => {
+      button(container, '大纲')!.click()
+    })
+    const panel = container.querySelector('.outline-pop')
+    expect(panel?.getAttribute('aria-label')).toBe('大纲')
+    expect(panel?.textContent).toContain('白塔')
+    expect(container.querySelector('.reader-tools')).toBeNull()
+    const stream = container.querySelector('.preview-stream') as HTMLElement
+    const headingEl = stream.querySelector('h2') as HTMLElement
+    headingEl.getBoundingClientRect = () =>
+      ({ top: 480, bottom: 510, left: 0, right: 100, width: 100, height: 30, x: 0, y: 480, toJSON() {} }) as DOMRect
+    stream.getBoundingClientRect = () =>
+      ({ top: 80, bottom: 600, left: 0, right: 100, width: 100, height: 520, x: 0, y: 80, toJSON() {} }) as DOMRect
+    stream.scrollTop = 40
+    act(() => {
+      button(container, '白塔')!.click()
+    })
+    expect(stream.scrollTop).toBe(440)
+    expect(container.querySelector('.outline-pop')).toBeNull()
+    expect(container.querySelector('.reader-tools')).toBeTruthy()
   })
 })
 
