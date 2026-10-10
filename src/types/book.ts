@@ -38,6 +38,7 @@ export interface BookRecord {
   tags?: string[]
   starred?: boolean
   lastExportedAt?: string
+  lastExportPath?: string
   lastReadAt?: string
   readChapterId?: string
   readOffset?: number

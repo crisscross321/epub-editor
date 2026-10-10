@@ -505,9 +505,13 @@ export async function saveProgress(
   }))
 }
 
-export async function markExported(bookId: string): Promise<BookRecord> {
+export async function markExported(bookId: string, exportPath?: string): Promise<BookRecord> {
   const book = await getBook(bookId)
-  return saveBook({ ...book, lastExportedAt: now() })
+  return saveBook({
+    ...book,
+    lastExportedAt: now(),
+    ...(exportPath ? { lastExportPath: exportPath } : {}),
+  })
 }
 
 export async function trashBook(id: string): Promise<void> {

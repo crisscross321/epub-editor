@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { isBackupReminderDismissed, needsBackupReminder, readingPercent } from './progress'
+import { exportStatusNote, isBackupReminderDismissed, needsBackupReminder, readingPercent } from './progress'
 
 describe('readingPercent', () => {
   it('maps chapter index and in-chapter offset to 0-100', () => {
     expect(readingPercent(0, 4, 0)).toBe(0)
     expect(readingPercent(1, 4, 0.5)).toBe(38)
     expect(readingPercent(3, 4, 1)).toBe(100)
+  })
+})
+
+describe('export status copy', () => {
+  it('states only whether the book has been exported', () => {
+    expect(exportStatusNote({})).toBe('尚未导出')
+    expect(exportStatusNote({ lastExportedAt: '2026-08-21T00:00:00.000Z' })).toBe('已导出')
+  })
+
+  it('appends the stored path when one was recorded', () => {
+    expect(
+      exportStatusNote({ lastExportedAt: '2026-08-21T00:00:00.000Z', lastExportPath: '下载/素笺/海边.epub' }),
+    ).toBe('已导出 · 下载/素笺/海边.epub')
   })
 })
 

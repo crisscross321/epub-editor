@@ -14,9 +14,15 @@ import {
   pickImageFile,
   pickTextFile,
   readBytesFromAppUrl,
-  saveBytesToUser,
+  canShareSavedEpub,
+  isUserCancel,
+  pickSaveDirectory,
+  saveBackupToDocuments,
   saveEpubToUser,
-  writeBytesToLibrary,
+  savePickedFile,
+  savedEpubMessage,
+  shareSavedEpub,
+  type SavedEpub,
 } from './storage/files'
 import { requestPersistentStorage } from './storage/persist'
 import {
@@ -65,6 +71,7 @@ export default function App() {
     title: string
     body: ReactNode
     confirm: string
+    cancel?: string | null
     extra?: string
     onExtra?: () => void
     danger?: boolean
@@ -513,18 +520,37 @@ export default function App() {
     }
   }
 
+  const showSavedFile = (saved: SavedEpub) => {
+    setConfirm({
+      title: '已保存',
+      body: savedEpubMessage(saved),
+      cancel: null,
+      confirm: '完成',
+      extra: canShareSavedEpub(saved) ? '分享' : undefined,
+      onExtra: () => {
+        void shareSavedEpub(saved).catch((err) => {
+          if (isUserCancel(err)) return
+          setConfirm(null)
+          fail(err)
+        })
+      },
+      action: () => setConfirm(null),
+    })
+  }
+
   const doExportEpub = async () => {
     if (!book) return
     try {
       setBusy(true)
       setNotice(null)
       const bytes = await books.exportEpub(book.id)
-      const name = `${book.title || '未命名'}.epub`
-      const message = await saveEpubToUser(name, bytes)
-      await books.markExported(book.id)
+      const saved = await saveEpubToUser(`${book.title || '未命名'}.epub`, bytes)
+      if (!saved) return
+      await books.markExported(book.id, saved.displayPath)
       await loadBook(book.id)
-      setNotice({ kind: 'ok', text: message })
+      showSavedFile(saved)
     } catch (err) {
+      if (isUserCancel(err)) return
       fail(err)
     } finally {
       setBusy(false)
@@ -575,15 +601,16 @@ export default function App() {
           : await books.bookPlainChapters(book.id)
       const text = kind === 'md' ? chaptersToMarkdown(chapters) : chaptersToPlain(chapters)
       const bytes = new TextEncoder().encode(text)
-      const message = await saveBytesToUser(
+      const saved = await savePickedFile(
         book.title || '未命名',
         bytes,
         kind === 'md' ? 'text/markdown' : 'text/plain',
         kind,
       )
-      setNotice({ kind: 'ok', text: message })
+      if (!saved) return
+      showSavedFile(saved)
     } catch (err) {
-      fail(err)
+      if (!isUserCancel(err)) fail(err)
     } finally {
       setBusy(false)
     }
@@ -604,25 +631,34 @@ export default function App() {
     ? 0
     : booksDueForExport.length
 
+  const exportEpubs = async (items: { id: string; title: string }[]) => {
+    if (items.length === 0) return
+    try {
+      setBusy(true)
+      const dir = await pickSaveDirectory()
+      if (!dir) return
+      for (const item of items) {
+        const bytes = await books.exportEpub(item.id)
+        const saved = await dir.write(item.title || '未命名', bytes, 'application/epub+zip', 'epub')
+        await books.markExported(item.id, saved.displayPath)
+      }
+      await refreshShelf()
+      setNotice({
+        kind: 'ok',
+        text: dir.displayPath ? `已导出 ${items.length} 本 · ${dir.displayPath}` : `已导出 ${items.length} 本`,
+      })
+    } catch (err) {
+      if (!isUserCancel(err)) fail(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportDueBooks = async () => {
     const due = list.filter((item) =>
       needsBackupReminder({ updatedAt: item.updatedAt, lastExportedAt: item.lastExportedAt, days: settings.backupDays }),
     )
-    if (due.length === 0) return
-    try {
-      setBusy(true)
-      for (const item of due) {
-        const bytes = await books.exportEpub(item.id)
-        await writeBytesToLibrary(item.title || '未命名', bytes, 'epub')
-        await books.markExported(item.id)
-      }
-      await refreshShelf()
-      setNotice({ kind: 'ok', text: `已把 ${due.length} 本 EPUB 写到「文档/素笺」。` })
-    } catch (err) {
-      fail(err)
-    } finally {
-      setBusy(false)
-    }
+    await exportEpubs(due)
   }
 
   const editorChapter =
@@ -919,8 +955,8 @@ export default function App() {
                 setBusy(true)
                 const bytes = await books.exportShelfBackup()
                 const stamp = new Date().toISOString().slice(0, 10)
-                const message = await saveBytesToUser(`素笺书架-${stamp}`, bytes, 'application/zip', 'zip')
-                setNotice({ kind: 'ok', text: message })
+                const path = await saveBackupToDocuments(`素笺书架-${stamp}`, bytes)
+                setNotice({ kind: 'ok', text: `已保存 · ${path}` })
               } catch (err) {
                 fail(err)
               } finally {
@@ -946,23 +982,7 @@ export default function App() {
             })()
           }}
           onExportAll={() => {
-            void (async () => {
-              try {
-                setBusy(true)
-                const all = await books.listBooks()
-                for (const item of all) {
-                  const bytes = await books.exportEpub(item.id)
-                  await writeBytesToLibrary(item.title || '未命名', bytes, 'epub')
-                  await books.markExported(item.id)
-                }
-                await refreshShelf()
-                setNotice({ kind: 'ok', text: `已把 ${all.length} 本 EPUB 写到「文档/素笺」。` })
-              } catch (err) {
-                fail(err)
-              } finally {
-                setBusy(false)
-              }
-            })()
+            void books.listBooks().then((all) => exportEpubs(all)).catch(fail)
           }}
         />
       ) : null}
@@ -1061,7 +1081,7 @@ export default function App() {
         <Dialog
           title={confirm.title}
           body={confirm.body}
-          cancel="取消"
+          cancel={confirm.cancel === null ? undefined : (confirm.cancel ?? '取消')}
           confirm={confirm.confirm}
           extra={confirm.extra}
           onExtra={confirm.onExtra}

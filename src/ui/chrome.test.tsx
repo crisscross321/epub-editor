@@ -1,7 +1,7 @@
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
-import { TopBar } from './chrome'
+import { Dialog, TopBar } from './chrome'
 
 const roots: Array<{ root: Root; container: HTMLDivElement }> = []
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -46,5 +46,40 @@ describe('TopBar', () => {
     )
     const settings = [...container.querySelectorAll('button')].find((btn) => btn.textContent === '设置')
     expect(settings?.className).toContain('btn-bubble')
+  })
+})
+
+describe('Dialog', () => {
+  it('offers 分享 beside 完成 after a save, without a cancel button', () => {
+    let shared = 0
+    let closed = 0
+    const container = render(
+      <Dialog
+        title="已保存"
+        body="《未命名.epub》已保存到你选择的位置。"
+        confirm="完成"
+        extra="分享"
+        onExtra={() => {
+          shared += 1
+        }}
+        onCancel={() => {
+          closed += 1
+        }}
+        onConfirm={() => {
+          closed += 1
+        }}
+      />,
+    )
+    const labels = [...container.querySelectorAll('button')].map((btn) => btn.textContent)
+    expect(labels).toEqual(['分享', '完成'])
+    act(() => {
+      ;[...container.querySelectorAll('button')].find((btn) => btn.textContent === '分享')?.click()
+    })
+    expect(shared).toBe(1)
+    expect(closed).toBe(0)
+    act(() => {
+      ;[...container.querySelectorAll('button')].find((btn) => btn.textContent === '完成')?.click()
+    })
+    expect(closed).toBe(1)
   })
 })

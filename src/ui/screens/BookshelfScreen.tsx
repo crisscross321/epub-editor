@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { coverHue } from '../../app/progress'
+import { coverHue, exportStatusNote } from '../../app/progress'
 import { bookProgress } from '../../app/sortBooks'
 import type { ShelfSort, ShelfView } from '../../storage/settings'
 import type { BookRecord } from '../../types/book'
@@ -240,7 +240,7 @@ export function BookshelfScreen(props: {
                   </h2>
                   <div className="muted">{book.author || '未署名'}</div>
                   <div className="muted">
-                    {new Date(book.updatedAt).toLocaleDateString('zh-CN')} 修改 · {book.lastExportedAt ? '已导出' : '尚未导出'}
+                    {new Date(book.updatedAt).toLocaleDateString('zh-CN')} 修改 · {exportStatusNote(book)}
                   </div>
                   <div className="continue-progress">
                     <div className="progress-track">

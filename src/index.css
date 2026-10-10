@@ -768,6 +768,13 @@ textarea {
   margin: 12px 0 0;
 }
 
+.book-save-note {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
 .book-head {
   display: flex;
   gap: 14px;

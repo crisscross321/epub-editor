@@ -12,6 +12,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(SaveDocumentPlugin.class);
         super.onCreate(savedInstanceState);
         if (bridge == null) return;
 

@@ -21,6 +21,15 @@ export function needsBackupReminder(input: {
   return now - updated >= days * DAY_MS
 }
 
+export function hasExported(input: { lastExportedAt?: string }): boolean {
+  return Boolean(input.lastExportedAt)
+}
+
+export function exportStatusNote(input: { lastExportedAt?: string; lastExportPath?: string }): string {
+  if (!hasExported(input)) return '尚未导出'
+  return input.lastExportPath ? `已导出 · ${input.lastExportPath}` : '已导出'
+}
+
 export function isBackupReminderDismissed(input: {
   dismissedAt?: string
   now?: number

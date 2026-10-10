@@ -344,6 +344,7 @@ describe('ChapterListScreen layout', () => {
     expect(container.textContent).toContain('摘要')
     expect(container.textContent).toContain('书籍信息')
     expect(container.textContent).toContain('继续阅读')
+    expect(container.querySelector('.book-save-note')?.textContent).toBe('尚未导出')
     expect(container.querySelector('.book-replace input[placeholder="查找……"]')).toBeTruthy()
     expect(container.querySelector('.book-replace input[placeholder="替换内容"]')).toBeTruthy()
     expect(container.querySelectorAll('.chapter-card').length).toBe(2)

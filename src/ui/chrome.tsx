@@ -48,7 +48,7 @@ export function Segmented<T extends string>(props: {
 export function Dialog(props: {
   title: string
   body: ReactNode
-  cancel: string
+  cancel?: string
   confirm: string
   extra?: string
   onExtra?: () => void
@@ -62,9 +62,11 @@ export function Dialog(props: {
         <h3>{props.title}</h3>
         {typeof props.body === 'string' ? <p className="muted">{props.body}</p> : <div className="muted">{props.body}</div>}
         <div className="dialog-actions">
-          <button className="btn btn-ghost" type="button" onClick={props.onCancel}>
-            {props.cancel}
-          </button>
+          {props.cancel ? (
+            <button className="btn btn-ghost" type="button" onClick={props.onCancel}>
+              {props.cancel}
+            </button>
+          ) : null}
           {props.extra && props.onExtra ? (
             <button className="btn btn-line" type="button" onClick={props.onExtra}>
               {props.extra}

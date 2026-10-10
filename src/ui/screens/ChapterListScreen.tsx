@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { exportStatusNote } from '../../app/progress'
 import { displayChapterName } from '../../epub/headings'
 import { bookOutline, canMoveChapter, chineseNumber, kindOf, partWordOf, type PartGroup } from '../../epub/parts'
 import { initialCollapsed, loadPartFold, savePartFold } from '../../storage/partFold'
@@ -480,6 +481,7 @@ export function ChapterListScreen(props: {
       </section>
 
       <section className="book-panel">
+        <p className="book-save-note">{exportStatusNote(props.book)}</p>
         <div className="action-grid">
           <button className="btn" type="button" onClick={props.onPreview}>
             继续阅读
