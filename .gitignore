@@ -30,8 +30,11 @@ release/*.apk
 *.sln
 *.sw?
 
-# Agent scratch (plans, specs, session notes) — not product docs
-docs/superpowers/
+# Planning notes stay on disk: reviews, roadmaps, design memos
+docs/
+REVIEW-*.md
+
+# Agent scratch (plans, specs, session notes)
 .workbuddy/
 .cursor/
 .claude/
