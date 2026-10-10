@@ -41,13 +41,33 @@ describe('SettingsScreen', () => {
     expect(container.textContent).not.toContain('字号')
     expect(container.textContent).not.toContain('字体')
     expect(container.textContent).not.toContain('翻页方式')
-    expect(container.querySelectorAll('.settings-block').length).toBe(4)
-    const night = [...container.querySelectorAll('button')].find((btn) => btn.textContent === '夜')
+    expect(container.querySelectorAll('.settings-block').length).toBe(5)
+    const night = [...container.querySelectorAll('button')].find((btn) => btn.textContent === '夜读')
     act(() => night?.click())
     expect(theme).toBe('night')
     expect(container.textContent).toContain('备份')
     expect(container.textContent).toContain('存储')
     expect(container.textContent).toContain('回收站')
+    expect(container.textContent).toContain('查找和替换')
+    expect(container.textContent).toContain('启用通配符')
+    expect(container.textContent).toContain('启用后，^p 表示换行')
+    const toggle = container.querySelector('[role="switch"]')
+    expect(toggle?.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('turns wildcard find on from the editor section', () => {
+    let enabled = false
+    const container = render(
+      <SettingsScreen
+        settings={{ ...defaultSettings, findWildcards: enabled }}
+        onChange={(patch) => {
+          if (patch.findWildcards != null) enabled = patch.findWildcards
+        }}
+      />,
+    )
+    const toggle = container.querySelector('[role="switch"]') as HTMLButtonElement
+    act(() => toggle.click())
+    expect(enabled).toBe(true)
   })
 
   it('lets the backup-day field be cleared before a new number is typed', () => {

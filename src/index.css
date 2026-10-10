@@ -14,6 +14,12 @@
   --seg-on: #fffaf0;
   --shadow: rgba(28, 20, 16, 0.08);
   --card: rgba(255, 252, 245, 0.7);
+  --dialog: #efe6d4;
+  --scrim: rgba(28, 20, 16, 0.45);
+  --on-accent: #f8efe4;
+  --hit: rgba(156, 43, 31, 0.22);
+  --hl: rgba(198, 146, 58, 0.35);
+  color-scheme: light;
   --radius: 8px;
   --bar-h: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -26,31 +32,43 @@
   text-rendering: optimizeLegibility;
 }
 
-[data-theme='sepia'] {
-  --paper: #e6d3a8;
-  --paper-deep: #d7c08a;
-  --bar: #eddcb5;
-  --ink: #3b2a18;
-  --ink-soft: #6b5438;
-  --seg-on: #f6ead0;
-  --card: rgba(247, 236, 210, 0.8);
+[data-theme='green'] {
+  --paper: #d4e5cf;
+  --paper-deep: #bcd3b5;
+  --bar: #e1eedd;
+  --ink: #1d2a1d;
+  --ink-soft: #475944;
+  --rule: rgba(29, 42, 29, 0.12);
+  --line: rgba(29, 42, 29, 0.2);
+  --fill: rgba(29, 42, 29, 0.06);
+  --seg-on: #edf5ea;
+  --shadow: rgba(29, 42, 29, 0.1);
+  --card: rgba(237, 245, 234, 0.75);
+  --dialog: #d4e5cf;
+  --scrim: rgba(29, 42, 29, 0.45);
 }
 
 [data-theme='night'] {
-  --paper: #12110f;
-  --paper-deep: #1c1a16;
-  --bar: #1a1814;
-  --ink: #e8e0d4;
-  --ink-soft: #b7ad9e;
-  --cinnabar: #d46a5c;
+  --paper: #161512;
+  --paper-deep: #2e2b25;
+  --bar: #24211d;
+  --ink: #cfc6b8;
+  --ink-soft: #a39a8b;
+  --cinnabar: #de7666;
   --cinnabar-deep: #e8b0a8;
-  --ok: #c5d4b4;
-  --rule: rgba(232, 224, 212, 0.14);
-  --line: rgba(232, 224, 212, 0.24);
-  --fill: rgba(232, 224, 212, 0.07);
-  --seg-on: #3b372f;
-  --shadow: rgba(0, 0, 0, 0.35);
-  --card: rgba(28, 26, 22, 0.9);
+  --ok: #b5c7a3;
+  --rule: rgba(207, 198, 184, 0.14);
+  --line: rgba(207, 198, 184, 0.24);
+  --fill: rgba(207, 198, 184, 0.08);
+  --seg-on: #3d3931;
+  --shadow: rgba(0, 0, 0, 0.4);
+  --card: #282520;
+  --dialog: #2b2823;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --on-accent: #1a0f0c;
+  --hit: rgba(222, 118, 102, 0.35);
+  --hl: rgba(214, 168, 84, 0.32);
+  color-scheme: dark;
 }
 
 * {
@@ -277,7 +295,7 @@ textarea {
 
 .btn-warn {
   background: var(--cinnabar);
-  color: #f8efe4;
+  color: var(--on-accent);
 }
 
 .btn.is-danger {
@@ -611,7 +629,7 @@ textarea {
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--cinnabar);
-  color: #f8efe4;
+  color: var(--on-accent);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -643,7 +661,7 @@ textarea {
 .pick-mark.is-on {
   background: var(--cinnabar);
   border-color: var(--cinnabar);
-  box-shadow: inset 0 0 0 3px #f6efe0;
+  box-shadow: inset 0 0 0 3px var(--on-accent);
 }
 
 .book-card {
@@ -956,8 +974,8 @@ textarea {
   width: 8px;
   height: 4px;
   margin-top: -2px;
-  border-left: 1.8px solid #f6efe0;
-  border-bottom: 1.8px solid #f6efe0;
+  border-left: 1.8px solid var(--on-accent);
+  border-bottom: 1.8px solid var(--on-accent);
   transform: rotate(-45deg);
 }
 
@@ -1376,12 +1394,21 @@ textarea {
   font-size: 12px;
 }
 
+.settings-switch {
+  align-items: flex-start;
+}
+
+.settings-switch .btn {
+  flex-shrink: 0;
+  min-width: 72px;
+}
+
 /* ---------- Dialog ---------- */
 
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(28, 20, 16, 0.45);
+  background: var(--scrim);
   display: grid;
   place-items: end center;
   z-index: 20;
@@ -1392,7 +1419,7 @@ textarea {
   width: min(100%, 440px);
   max-height: calc(100dvh - 24px - var(--safe-top));
   overflow: auto;
-  background: var(--paper);
+  background: var(--dialog);
   padding: 20px 20px 14px;
   border-radius: 16px;
   margin-bottom: var(--safe-bottom);

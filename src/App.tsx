@@ -108,18 +108,23 @@ export default function App() {
   useEffect(() => bindKeyboardReveal(), [])
 
   useEffect(() => {
-    const resolved = resolveTheme(settings.theme, window.matchMedia('(prefers-color-scheme: dark)').matches)
-    applyTheme(resolved)
-    void import('@capacitor/status-bar')
-      .then(({ StatusBar, Style }) =>
-        Promise.all([
-          StatusBar.setStyle({ style: resolved === 'night' ? Style.Dark : Style.Light }),
-          StatusBar.setBackgroundColor({
-            color: resolved === 'night' ? '#12110f' : resolved === 'sepia' ? '#e6d3a8' : '#efe6d4',
-          }).catch(() => undefined),
-        ]),
-      )
-      .catch(() => undefined)
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const sync = () => {
+      const resolved = resolveTheme(settings.theme, media.matches)
+      const bar = applyTheme(resolved)
+      void import('@capacitor/status-bar')
+        .then(({ StatusBar, Style }) =>
+          Promise.all([
+            StatusBar.setStyle({ style: resolved === 'night' ? Style.Dark : Style.Light }),
+            bar ? StatusBar.setBackgroundColor({ color: bar }).catch(() => undefined) : undefined,
+          ]),
+        )
+        .catch(() => undefined)
+    }
+    sync()
+    if (settings.theme !== 'system') return
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
   }, [settings.theme])
 
   const fail = (err: unknown) => setNotice({ kind: 'err', text: books.messageForUnknown(err) })
@@ -863,7 +868,7 @@ export default function App() {
           }}
           onReplaceAll={(search, replacement) =>
             books
-              .replaceAllInBook(book.id, search, replacement)
+              .replaceAllInBook(book.id, search, replacement, { wildcards: settings.findWildcards })
               .then(async (result) => {
                 await loadBook(book.id)
                 return result
@@ -998,6 +1003,7 @@ export default function App() {
             onNextChapter={() => void changeEditorChapter(neighbors.nextId)}
             hasPrevChapter={Boolean(neighbors.prevId)}
             hasNextChapter={Boolean(neighbors.nextId)}
+            wildcards={settings.findWildcards}
             onReplaceBook={(search, replacement) => {
               setConfirm({
                 title: '全书替换？',
@@ -1012,7 +1018,7 @@ export default function App() {
                     try {
                       const saved = await flushEditor()
                       if (!saved) return
-                      const result = await books.replaceAllInBook(route.bookId, search, replacement)
+                      const result = await books.replaceAllInBook(route.bookId, search, replacement, { wildcards: settings.findWildcards })
                       const next = await books.getDoc(route.bookId, route.chapterId)
                       if (next) {
                         const hydrated = await books.hydrateDocImages(route.bookId, next)

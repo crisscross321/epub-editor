@@ -51,6 +51,28 @@ export function SettingsScreen(props: {
       </section>
 
       <section className="settings-block">
+        <h2 className="section-title">查找和替换</h2>
+        <div className="field-row settings-switch">
+          <span>
+            启用通配符
+            <span className="muted settings-sub">
+              启用后，^p 表示换行，^^ 表示字符 ^，^^p 表示正文里的 ^p。
+            </span>
+          </span>
+          <button
+            className={props.settings.findWildcards ? 'btn btn-compact' : 'btn btn-line btn-compact'}
+            type="button"
+            role="switch"
+            aria-checked={props.settings.findWildcards}
+            aria-label="启用通配符"
+            onClick={() => props.onChange({ findWildcards: !props.settings.findWildcards })}
+          >
+            {props.settings.findWildcards ? '已开启' : '已关闭'}
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-block">
         <h2 className="section-title">备份</h2>
         <p className="muted">书只存在这台手机的应用里。卸载或清除数据会丢掉书架，导出到系统目录才是备份。</p>
         <label className="field-row">

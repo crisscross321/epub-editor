@@ -645,6 +645,7 @@ export async function replaceAllInBook(
   bookId: string,
   search: string,
   replacement: string,
+  options?: { wildcards?: boolean },
 ): Promise<{ count: number; skipped: number }> {
   return enqueueByKey(bookId, async () => {
     const book = await getBook(bookId)
@@ -655,7 +656,7 @@ export async function replaceAllInBook(
     for (const chapter of chapters) {
       if (chapter.state !== 'simplified') { skipped += 1; continue }
       const doc = (await db.getDoc(bookId, chapter.id)) ?? emptyDoc()
-      const result = replaceAllInDoc(doc, search, replacement)
+      const result = replaceAllInDoc(doc, search, replacement, options)
       if (result.count) {
         count += result.count
         documents.push({ chapterId: chapter.id, doc: result.doc })

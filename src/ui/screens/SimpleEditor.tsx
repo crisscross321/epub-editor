@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { findInRoot, revealElement } from '../../editor/find'
+import { findInRoot, revealElement, selectionTapeIndex } from '../../editor/find'
+import { decodeWildcard } from '../../editor/wildcards'
 import { simplifyXhtml } from '../../epub/simplify'
 import { parseHtml } from '../../epub/xml'
 import { docToXhtml } from '../../epub/serialize'
@@ -44,6 +45,7 @@ export function SimpleEditor(props: {
   onInsertImage: () => void
   onPreview?: () => void
   onReplaceBook?: (search: string, replacement: string) => void
+  wildcards?: boolean
   onSplit?: () => void
   onPrevChapter?: () => void
   onNextChapter?: () => void
@@ -337,24 +339,50 @@ export function SimpleEditor(props: {
         ) : null}
         {showFind ? (
           <FindReplaceBar
-            onFind={(search) => findInRoot(surface.current, search, true)}
-            onFindNext={(search) => findInRoot(surface.current, search, false)}
+            onFind={(search) => findInRoot(surface.current, search, true, !!props.wildcards)}
+            onFindNext={(search) => findInRoot(surface.current, search, false, !!props.wildcards)}
             onReplace={(search, replacement) => {
               if (!search) return
+              const enabled = !!props.wildcards
+              const needle = decodeWildcard(search, enabled)
+              const repl = decodeWildcard(replacement, enabled)
+              if (needle.structural || repl.structural) {
+                const el = surface.current
+                if (!el) return
+                const { doc, count } = replaceAllInDoc(currentDoc(), search, replacement, {
+                  wildcards: enabled,
+                  from: selectionTapeIndex(el),
+                  once: true,
+                })
+                if (!count) return
+                const scroll = document.scrollingElement?.scrollTop ?? 0
+                preserveFullSelection.current = true
+                try {
+                  focusSurface()
+                  replaceEditorHtml(el, toInnerHtml(doc))
+                  emitChange()
+                  if (document.scrollingElement) document.scrollingElement.scrollTop = scroll
+                } finally {
+                  window.setTimeout(() => {
+                    preserveFullSelection.current = false
+                  }, 0)
+                }
+                return
+              }
               focusSurface()
               const sel = window.getSelection()
-              if (sel && surface.current?.contains(sel.anchorNode) && sel.toString() === search) {
-                run('insertText', replacement)
+              if (sel && surface.current?.contains(sel.anchorNode) && sel.toString() === needle.needle) {
+                run('insertText', repl.needle)
                 emitChange()
                 return
               }
-              if (findInRoot(surface.current, search, false) && window.getSelection()?.toString() === search) {
-                run('insertText', replacement)
+              if (findInRoot(surface.current, search, false, enabled) && window.getSelection()?.toString() === needle.needle) {
+                run('insertText', repl.needle)
                 emitChange()
               }
             }}
             onReplaceAll={(search, replacement) => {
-              const { doc, count } = replaceAllInDoc(currentDoc(), search, replacement)
+              const { doc, count } = replaceAllInDoc(currentDoc(), search, replacement, { wildcards: !!props.wildcards })
               const el = surface.current
               if (!el || !count) return count
               const scroll = document.scrollingElement?.scrollTop ?? 0

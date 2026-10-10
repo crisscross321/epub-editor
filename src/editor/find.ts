@@ -1,3 +1,5 @@
+import { decodeWildcard } from './wildcards'
+
 const MATCH_PAD = 16
 
 export function moveCaretToStart(root: HTMLElement): void {
@@ -95,10 +97,173 @@ function revealMatch(range: Range, root: HTMLElement): void {
   })
 }
 
+const OBJECT = '\uFFFC'
+const BLOCK = /^(P|DIV|H[1-6]|UL|OL|LI|BLOCKQUOTE)$/
+
+interface DomPoint {
+  kind: 'char'
+  node: Text
+  offset: number
+}
+
+interface DomLine {
+  text: string
+  block: HTMLElement
+  points: DomPoint[]
+}
+
+function blankLine(block: HTMLElement): DomLine {
+  return { text: '', block, points: [] }
+}
+
+function inlineLines(el: HTMLElement): DomLine[] {
+  const lines: DomLine[] = [blankLine(el)]
+  let meaningful = false
+  let brs = 0
+  const current = () => lines[lines.length - 1]!
+  const visit = (node: Node) => {
+    if (node instanceof HTMLBRElement) {
+      brs += 1
+      lines.push(blankLine(el))
+      return
+    }
+    if (node instanceof HTMLImageElement) {
+      meaningful = true
+      current().text += OBJECT
+      return
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      const data = node.textContent ?? ''
+      for (let i = 0; i < data.length; i += 1) {
+        if (data[i] === '\uFEFF') continue
+        meaningful = true
+        current().text += data[i]
+        current().points.push({ kind: 'char', node: node as Text, offset: i })
+      }
+      return
+    }
+    node.childNodes.forEach(visit)
+  }
+  el.childNodes.forEach(visit)
+  if (!meaningful) return Array.from({ length: Math.max(1, brs) }, () => blankLine(el))
+  return lines
+}
+
+function linesOf(el: HTMLElement): DomLine[] {
+  const blocks = [...el.children].filter((child): child is HTMLElement => child instanceof HTMLElement && BLOCK.test(child.tagName))
+  if (blocks.length) return blocks.flatMap((child) => linesOf(child))
+  return inlineLines(el)
+}
+
+function domLines(root: HTMLElement): DomLine[] {
+  return [...root.children].flatMap((el) => (el instanceof HTMLElement ? linesOf(el) : []))
+}
+
+export function domSearchText(root: HTMLElement): string {
+  return domLines(root).map((line) => line.text).join('\n')
+}
+
+function endOfLine(line: DomLine): { node: Node; offset: number } {
+  if (!line.points.length) return { node: line.block, offset: 0 }
+  const last = line.points[line.points.length - 1]!
+  return { node: last.node, offset: last.offset + 1 }
+}
+
+function endpoint(lines: DomLine[], index: number): { node: Node; offset: number } {
+  let cursor = 0
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!
+    if (index <= cursor + line.text.length) {
+      const local = index - cursor
+      if (!line.points.length) return { node: line.block, offset: 0 }
+      if (local >= line.points.length) return endOfLine(line)
+      const point = line.points[local]!
+      return { node: point.node, offset: point.offset }
+    }
+    cursor += line.text.length
+    if (i < lines.length - 1) {
+      if (index === cursor) return endOfLine(line)
+      cursor += 1
+    }
+  }
+  const last = lines[lines.length - 1]
+  return last ? endOfLine(last) : { node: lines[0]!.block, offset: 0 }
+}
+
+export function selectionTapeIndex(root: HTMLElement | null): number {
+  if (!root) return 0
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || !root.contains(selection.anchorNode)) return 0
+  const range = selection.getRangeAt(0)
+  const lines = domLines(root)
+  let cursor = 0
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!
+    if (!line.points.length && line.block.contains(range.startContainer)) {
+      const owned = lines.some((other) =>
+        other.points.some((point) => point.node === range.startContainer),
+      )
+      if (!owned) return cursor
+    }
+    for (const point of line.points) {
+      if (point.node === range.startContainer && point.offset === range.startOffset) return cursor
+      cursor += 1
+    }
+    if (line.points.length) {
+      const tail = line.points[line.points.length - 1]!
+      if (tail.node === range.startContainer && range.startOffset === tail.offset + 1) return cursor
+    }
+    if (i < lines.length - 1) cursor += 1
+  }
+  return 0
+}
+
+function findWithBreaks(root: HTMLElement, search: string, fromStart: boolean): boolean {
+  const needle = decodeWildcard(search, true).needle
+  if (!needle) return false
+  const lines = domLines(root)
+  if (!lines.length) return false
+  const text = lines.map((line) => line.text).join('\n')
+  const source = text.toLocaleLowerCase()
+  const folded = needle.toLocaleLowerCase()
+  if (source.length !== text.length || folded.length !== needle.length) return false
+  const selection = window.getSelection()
+  let start = 0
+  if (!fromStart && selection?.rangeCount && root.contains(selection.anchorNode)) {
+    start = selectionTapeIndex(root)
+  }
+  let index = source.indexOf(folded, start)
+  if (index < 0 && start > 0) index = source.indexOf(folded)
+  if (index < 0) return false
+  const range = document.createRange()
+  const from = endpoint(lines, index)
+  const to = endpoint(lines, index + folded.length)
+  range.setStart(from.node, from.offset)
+  range.setEnd(to.node, to.offset)
+  root.focus({ preventScroll: true })
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  if (matchLineRect(range)) revealMatch(range, root)
+  else {
+    let cursor = 0
+    let block = lines[0]?.block ?? root
+    for (const line of lines) {
+      if (index <= cursor + line.text.length) {
+        block = line.block
+        break
+      }
+      cursor += line.text.length + 1
+    }
+    revealElement(block)
+  }
+  return true
+}
+
 // Search only this editor, including matches spanning inline formatting nodes.
 // window.find searches the whole page (including the search form itself).
-export function findInRoot(root: HTMLElement | null, search: string, fromStart: boolean): boolean {
+export function findInRoot(root: HTMLElement | null, search: string, fromStart: boolean, wildcards = false): boolean {
   if (!root || !search) return false
+  if (wildcards) return findWithBreaks(root, search, fromStart)
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const nodes: { node: Text; start: number }[] = []
   let text = ''

@@ -43,6 +43,7 @@ function escapeAttr(id: string): string {
 }
 
 const PREVIEW_HEADING = 'h1, h2, h3, h4, h5, h6'
+const FRAME_THEME_VARS = ['--ink', '--hit', '--hl'] as const
 
 function scrollTopForHeading(scrollTop: number, containerTop: number, elementTop: number): number {
   return Math.max(0, scrollTop + elementTop - containerTop)
@@ -397,8 +398,14 @@ export function PreviewScreen(props: {
     const chapterId = chapter.id
     const el = doc.documentElement
     // srcDoc is an isolated document and does not inherit theme variables.
-    const theme = getComputedStyle(document.documentElement)
-    el.style.setProperty('--ink', theme.getPropertyValue('--ink'))
+    const syncTheme = () => {
+      const theme = getComputedStyle(document.documentElement)
+      for (const name of FRAME_THEME_VARS) el.style.setProperty(name, theme.getPropertyValue(name))
+      el.style.colorScheme = theme.colorScheme
+    }
+    syncTheme()
+    const themeObserver = new MutationObserver(syncTheme)
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     const measure = () => {
       const height = Math.max(el.clientHeight, 1)
       setPages(Math.max(1, Math.ceil(el.scrollHeight / height)))
@@ -439,6 +446,7 @@ export function PreviewScreen(props: {
     winFrame.addEventListener('resize', restore)
     doc.addEventListener('load', restore, true)
     frameCleanup.current = () => {
+      themeObserver.disconnect()
       doc.removeEventListener('mouseup', emitSel)
       doc.removeEventListener('touchend', emitSel)
       winFrame.removeEventListener('scroll', scroll)

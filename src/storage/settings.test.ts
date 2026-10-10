@@ -12,6 +12,13 @@ describe('settings', () => {
 
   it('maps system theme to night when the OS is dark', () => {
     expect(resolveTheme('system', true)).toBe('night')
-    expect(resolveTheme('sepia', true)).toBe('sepia')
+    expect(resolveTheme('system', false)).toBe('paper')
+    expect(resolveTheme('green', true)).toBe('green')
+  })
+
+  it('migrates the old sepia theme to green', () => {
+    localStorage.clear()
+    localStorage.setItem('sujian.settings', JSON.stringify({ theme: 'sepia' }))
+    expect(loadSettings().theme).toBe('green')
   })
 })

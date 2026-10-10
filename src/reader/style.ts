@@ -27,7 +27,7 @@ export function readerBodyCss(settings: AppSettings, matchEditor: boolean, scope
     ${prefix}p { margin: 0 0 0.8em; }
     ${prefix}img { max-width: 100%; height: auto; display: block; margin: 12px auto; }
     ${prefix}a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
-    ${prefix}mark.hit { background: rgba(156, 43, 31, 0.22); color: inherit; }
-    ${prefix}.hl { background: rgba(198, 146, 58, 0.35); }
+    ${prefix}mark.hit { background: var(--hit, rgba(156, 43, 31, 0.22)); color: inherit; }
+    ${prefix}.hl { background: var(--hl, rgba(198, 146, 58, 0.35)); }
   `
 }

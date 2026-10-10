@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { findInRoot, scrollDeltaForMatch } from './find'
+import { docToXhtml } from '../epub/serialize'
+import { docSearchText } from '../epub/newlines'
+import type { TiptapDoc } from '../types/book'
+import { parseHtml } from '../epub/xml'
+import { domSearchText, findInRoot, scrollDeltaForMatch, selectionTapeIndex } from './find'
 
 afterEach(() => {
   document.body.innerHTML = ''
@@ -25,6 +29,42 @@ describe('findInRoot', () => {
     expect(findInRoot(root, '夜宴', false)).toBe(true)
     expect(window.getSelection()!.anchorNode).toBe(first)
   })
+  it('finds a blank line as ^p^p when wildcards are on', () => {
+    document.body.innerHTML = '<div contenteditable="true"><p>第一段</p><p><br></p><p>第二段</p></div>'
+    const root = document.querySelector('div')!
+    expect(domSearchText(root)).toBe('第一段\n\n第二段')
+    expect(findInRoot(root, '^p^p', true, true)).toBe(true)
+    expect(findInRoot(root, '^p', true, false)).toBe(false)
+  })
+
+  it('keeps the same line breaks as the saved chapter', () => {
+    const chapter: TiptapDoc = {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '白塔' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '上' }, { type: 'hardBreak' }, { type: 'text', text: '下' }] },
+        { type: 'paragraph', content: [{ type: 'hardBreak' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '再一段' }] },
+      ],
+    }
+    const host = document.createElement('div')
+    host.innerHTML = parseHtml(docToXhtml(chapter, '章')).body?.innerHTML ?? ''
+    expect(domSearchText(host)).toBe(docSearchText(chapter))
+  })
+
+  it('maps a caret in the next paragraph onto the tape', () => {
+    document.body.innerHTML = '<div contenteditable="true"><p>第一段</p><p>第二段</p></div>'
+    const root = document.querySelector('div') as HTMLElement
+    const text = root.querySelectorAll('p')[1]!.firstChild as Text
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.collapse(true)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+    expect(selectionTapeIndex(root)).toBe(4)
+  })
+
   it('does not match text outside the editor or empty queries', () => {
     document.body.innerHTML = '<p>夜宴</p><div contenteditable="true">白塔</div>'
     const root = document.querySelector('div')!
